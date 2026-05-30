@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automated FFG Exceedance Dashboard</title>
+    <style>
+        :root {
+            --primary-blue: #003366;
+            --secondary-blue: #4A90E2;
+            --bg-color: #f4f7f6;
+            --text-color: #333;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: var(--primary-blue);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            margin: 0;
+            font-size: 28px;
+            letter-spacing: 1px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        .section-title {
+            border-bottom: 3px solid var(--secondary-blue);
+            padding-bottom: 10px;
+            margin-top: 40px;
+            color: var(--primary-blue);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .archive-controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        select, input[type="date"], button {
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: var(--secondary-blue);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s ease;
+        }
+        button:hover {
+            background-color: var(--primary-blue);
+        }
+        #error-msg {
+            display: none;
+            color: #D8000C;
+            background-color: #FFD2D2;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            font-weight: bold;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>HREF vs. REFS FFG Exceedance Dashboard</h1>
+    <p>Automated Operational Comparison Tool</p>
+</header>
+
+<div class="container">
+
+    <h2 class="section-title">Latest Operational Guidance</h2>
+    <div class="grid">
+        <div class="card">
+            <h3>Day 1 ERO Period</h3>
+            <img src="day1_latest.png" alt="Day 1 Latest FFG Exceedance" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=Awaiting+First+Automated+Run...';">
+        </div>
+        <div class="card">
+            <h3>Day 2 ERO Period</h3>
+            <img src="day2_latest.png" alt="Day 2 Latest FFG Exceedance" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=Awaiting+First+Automated+Run...';">
+        </div>
+    </div>
+
+    <h2 class="section-title">Historical Event Archive</h2>
+    <div class="archive-controls">
+        <label for="archive-date"><strong>Date:</strong></label>
+        <input type="date" id="archive-date" required>
+
+        <label for="archive-cycle"><strong>Cycle:</strong></label>
+        <select id="archive-cycle">
+            <option value="00">00z</option>
+            <option value="06">06z</option>
+            <option value="12" selected>12z</option>
+            <option value="18">18z</option>
+        </select>
+
+        <label for="archive-day"><strong>Target Day:</strong></label>
+        <select id="archive-day">
+            <option value="1">Day 1</option>
+            <option value="2">Day 2</option>
+        </select>
+
+        <button onclick="loadArchive()">Load Archived Graphic</button>
+    </div>
+
+    <div class="card" id="archive-display-card">
+        <div id="error-msg">⚠️ No archived data found for this specific date and cycle.</div>
+        <img id="archive-img" src="" style="display: none;" alt="Archived Graphic">
+    </div>
+
+</div>
+
+<script>
+    // Set the date picker to today's date by default
+    document.getElementById('archive-date').valueAsDate = new Date();
+
+    function loadArchive() {
+        // 1. Get the values from the dropdowns
+        let rawDate = document.getElementById('archive-date').value;
+        let cycleVal = document.getElementById('archive-cycle').value;
+        let dayVal = document.getElementById('archive-day').value;
+
+        // 2. Format the date from YYYY-MM-DD to YYYYMMDD to match our Python script
+        let formattedDate = rawDate.replace(/-/g, '');
+
+        // 3. Construct the exact URL path
+        let imgPath = `archive/${formattedDate}_${cycleVal}z_day${dayVal}.png`;
+
+        // 4. Update the image on the page
+        let imgElement = document.getElementById('archive-img');
+        let errorMsg = document.getElementById('error-msg');
+
+        // If the image loads successfully, show it and hide the error
+        imgElement.onload = function() {
+            imgElement.style.display = 'block';
+            errorMsg.style.display = 'none';
+        }
+
+        // If the image fails to load (404 Not Found), show the error and hide the image
+        imgElement.onerror = function() {
+            imgElement.style.display = 'none';
+            errorMsg.style.display = 'block';
+        }
+
+        // Trigger the load
+        imgElement.src = imgPath;
+    }
+</script>
+
+</body>
+</html>
