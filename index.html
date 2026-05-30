@@ -81,6 +81,16 @@
             border-radius: 4px;
         }
         
+        /* Restricts the CSU map width so it doesn't look massive */
+        .csu-img {
+            max-width: 60%;
+            margin: 0 auto;
+            display: block;
+        }
+        @media (max-width: 1000px) {
+            .csu-img { max-width: 90%; }
+        }
+        
         .archive-controls {
             background: white;
             padding: 20px;
@@ -152,7 +162,7 @@
         <button class="controls-btn" onclick="loadArchive()">Load Archived Graphic</button>
     </div>
 
-    <div class="card" id="archive-display-card">
+    <div class="card" id="archive-display-card" style="display: none;">
         <div id="error-msg">⚠️ No archived data found for this specific date and cycle.</div>
         <img id="archive-img" src="" style="display: none;" alt="Archived Graphic">
     </div>
@@ -164,14 +174,14 @@
     </div>
 
     <div class="card">
-        <h3 id="csu-title">CSU Machine Learning ERO</h3>
-        <img id="csu-ml-img" src="" alt="CSU ML ERO" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=CSU+ML+Graphic+Not+Available+Yet';">
-        <p id="csu-status-text" style="font-size: 14px; color: gray; font-style: italic;"></p>
+        <h3 id="automated-title">HREF vs REFS FFG Exceedance</h3>
+        <img id="automated-latest-img" src="day1_latest.png" alt="Latest FFG Exceedance" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=Awaiting+First+Automated+Run...';">
     </div>
 
     <div class="card">
-        <h3 id="automated-title">HREF vs REFS FFG Exceedance</h3>
-        <img id="automated-latest-img" src="day1_latest.png" alt="Latest FFG Exceedance" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=Awaiting+First+Automated+Run...';">
+        <h3 id="csu-title">CSU Machine Learning ERO</h3>
+        <img id="csu-ml-img" class="csu-img" src="" alt="CSU ML ERO" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=CSU+ML+Graphic+Not+Available+Yet';">
+        <p id="csu-status-text" style="font-size: 14px; color: gray; font-style: italic;"></p>
     </div>
 
 </div>
@@ -255,8 +265,12 @@
         let formattedDate = rawDate.replace(/-/g, '');
         let imgPath = `archive/${formattedDate}_${cycleVal}z_day${dayVal}.png`;
         
+        let cardContainer = document.getElementById('archive-display-card');
         let imgElement = document.getElementById('archive-img');
         let errorMsg = document.getElementById('error-msg');
+
+        // Unhide the card container now that a request is made
+        cardContainer.style.display = 'block';
 
         imgElement.onload = function() {
             imgElement.style.display = 'block';
@@ -267,9 +281,4 @@
             errorMsg.style.display = 'block';
         }
         
-        imgElement.src = imgPath;
-    }
-</script>
-
-</body>
-</html>
+        imgElement.src = imgPath
