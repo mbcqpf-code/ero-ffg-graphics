@@ -1,0 +1,7 @@
+xarray
+cfgrib
+requests
+matplotlib
+cartopy
+scipy
+numpy
