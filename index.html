@@ -10,6 +10,7 @@
             --secondary-blue: #4A90E2;
             --bg-color: #f4f7f6;
             --text-color: #333;
+            --active-tab: #002244;
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -25,34 +26,53 @@
             text-align: center;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        h1 {
-            margin: 0;
-            font-size: 28px;
-            letter-spacing: 1px;
-        }
+        h1 { margin: 0; font-size: 28px; letter-spacing: 1px; }
+        
         .container {
             max-width: 1400px;
             margin: 20px auto;
             padding: 0 20px;
         }
+        
+        /* Tab Navigation Controls */
+        .tab-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        .tab-btn {
+            background-color: var(--secondary-blue);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .tab-btn:hover { background-color: var(--primary-blue); }
+        .tab-btn.active {
+            background-color: var(--active-tab);
+            box-shadow: inset 0 3px 5px rgba(0,0,0,0.2);
+        }
+
         .section-title {
             border-bottom: 3px solid var(--secondary-blue);
             padding-bottom: 10px;
             margin-top: 40px;
             color: var(--primary-blue);
         }
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 30px;
-            margin-top: 20px;
-        }
+        
         .card {
             background: white;
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.05);
             text-align: center;
+            margin-bottom: 20px;
         }
         img {
             max-width: 100%;
@@ -60,6 +80,7 @@
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+        
         .archive-controls {
             background: white;
             padding: 20px;
@@ -78,7 +99,7 @@
             border: 1px solid #ccc;
             border-radius: 4px;
         }
-        button {
+        .controls-btn {
             background-color: var(--secondary-blue);
             color: white;
             border: none;
@@ -86,9 +107,8 @@
             font-weight: bold;
             transition: background 0.3s ease;
         }
-        button:hover {
-            background-color: var(--primary-blue);
-        }
+        .controls-btn:hover { background-color: var(--primary-blue); }
+        
         #error-msg {
             display: none;
             color: #D8000C;
@@ -110,7 +130,7 @@
 
 <div class="container">
 
-    <h2 class="section-title" style="margin-top: 20px;">Historical Event Archive</h2>
+    <h2 class="section-title" style="margin-top: 10px;">Historical Event Archive</h2>
     <div class="archive-controls">
         <label for="archive-date"><strong>Date:</strong></label>
         <input type="date" id="archive-date" required>
@@ -129,7 +149,7 @@
             <option value="2">Day 2</option>
         </select>
 
-        <button onclick="loadArchive()">Load Archived Graphic</button>
+        <button class="controls-btn" onclick="loadArchive()">Load Archived Graphic</button>
     </div>
 
     <div class="card" id="archive-display-card">
@@ -138,52 +158,115 @@
     </div>
 
     <h2 class="section-title">Latest Operational Guidance</h2>
-    <div class="grid">
-        <div class="card">
-            <h3>Day 1 ERO Period</h3>
-            <img src="day1_latest.png" alt="Day 1 Latest FFG Exceedance" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=Awaiting+First+Automated+Run...';">
-        </div>
-        <div class="card">
-            <h3>Day 2 ERO Period</h3>
-            <img src="day2_latest.png" alt="Day 2 Latest FFG Exceedance" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=Awaiting+First+Automated+Run...';">
-        </div>
+    <div class="tab-controls">
+        <button id="btn-day1" class="tab-btn active" onclick="setTargetDay(1)">View Day 1 Threat</button>
+        <button id="btn-day2" class="tab-btn" onclick="setTargetDay(2)">View Day 2 Threat</button>
+    </div>
+
+    <div class="card">
+        <h3 id="csu-title">CSU Machine Learning ERO</h3>
+        <img id="csu-ml-img" src="" alt="CSU ML ERO" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=CSU+ML+Graphic+Not+Available+Yet';">
+        <p id="csu-status-text" style="font-size: 14px; color: gray; font-style: italic;"></p>
+    </div>
+
+    <div class="card">
+        <h3 id="automated-title">HREF vs REFS FFG Exceedance</h3>
+        <img id="automated-latest-img" src="day1_latest.png" alt="Latest FFG Exceedance" onerror="this.onerror=null; this.src='https://via.placeholder.com/1200x500?text=Awaiting+First+Automated+Run...';">
     </div>
 
 </div>
 
 <script>
-    // Set the date picker to today's date by default
+    // --- GLOBAL VARIABLES & INITIALIZATION ---
+    let currentTargetDay = 1;
     document.getElementById('archive-date').valueAsDate = new Date();
 
+    // Run immediately to load the correct Day 1 data
+    window.onload = function() {
+        updateCSUImage();
+    };
+
+    // --- DAY TOGGLE LOGIC ---
+    function setTargetDay(day) {
+        currentTargetDay = day;
+        
+        // Update button styles
+        document.getElementById('btn-day1').classList.toggle('active', day === 1);
+        document.getElementById('btn-day2').classList.toggle('active', day === 2);
+        
+        // Update Titles
+        document.getElementById('csu-title').innerText = `CSU Machine Learning ERO (Day ${day})`;
+        document.getElementById('automated-title').innerText = `HREF vs REFS FFG Exceedance (Day ${day})`;
+
+        // Swap the automated internal image
+        document.getElementById('automated-latest-img').src = `day${day}_latest.png`;
+        
+        // Recalculate and swap the external CSU image
+        updateCSUImage();
+    }
+
+    // --- DYNAMIC CSU ML TIME LOGIC ---
+    function updateCSUImage() {
+        const now = new Date();
+        const utcHour = now.getUTCHours();
+        let baseDate = new Date(now.getTime());
+        
+        let cycle = "12";
+        let csuTargetDay = currentTargetDay;
+
+        // ERO Gap Logic Breakdown
+        if (utcHour >= 18) {
+            // 18z to 23:59z: 12z run is ready.
+            cycle = "12";
+        } else if (utcHour >= 0 && utcHour < 3) {
+            // 00z to 02:59z: Next UTC day, but use previous day's 12z run.
+            cycle = "12";
+            baseDate.setUTCDate(baseDate.getUTCDate() - 1);
+        } else if (utcHour >= 3 && utcHour < 6) {
+            // 03z to 05:59z: HREF updated to new day. Wait for 00z CSU run by pulling previous day's 12z (shifted forward 1 day).
+            cycle = "12";
+            baseDate.setUTCDate(baseDate.getUTCDate() - 1);
+            csuTargetDay = currentTargetDay + 1;
+        } else if (utcHour >= 6 && utcHour < 18) {
+            // 06z to 17:59z: 00z run is ready.
+            cycle = "00";
+        }
+
+        // Format Date to YYYYMMDD
+        const yyyy = baseDate.getUTCFullYear();
+        const mm = String(baseDate.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(baseDate.getUTCDate()).padStart(2, '0');
+        const dateStr = `${yyyy}${mm}${dd}`;
+
+        // Inject URL
+        const imgUrl = `https://www.wpc.ncep.noaa.gov/hmt/hmt_webpages/images/CSU_ERO/${dateStr}/csuero_eroufvsday${csuTargetDay}_${dateStr}${cycle}.png`;
+        document.getElementById('csu-ml-img').src = imgUrl;
+        
+        // Update helper text so forecasters know exactly what model they are looking at
+        document.getElementById('csu-status-text').innerText = `Currently displaying: ${dateStr} ${cycle}z Run (CSU Target Day ${csuTargetDay})`;
+    }
+
+    // --- ARCHIVE VIEWER LOGIC ---
     function loadArchive() {
-        // 1. Get the values from the dropdowns
         let rawDate = document.getElementById('archive-date').value;
         let cycleVal = document.getElementById('archive-cycle').value;
         let dayVal = document.getElementById('archive-day').value;
-
-        // 2. Format the date from YYYY-MM-DD to YYYYMMDD to match our Python script
+        
         let formattedDate = rawDate.replace(/-/g, '');
-
-        // 3. Construct the exact URL path
         let imgPath = `archive/${formattedDate}_${cycleVal}z_day${dayVal}.png`;
-
-        // 4. Update the image on the page
+        
         let imgElement = document.getElementById('archive-img');
         let errorMsg = document.getElementById('error-msg');
 
-        // If the image loads successfully, show it and hide the error
         imgElement.onload = function() {
             imgElement.style.display = 'block';
             errorMsg.style.display = 'none';
         }
-
-        // If the image fails to load (404 Not Found), show the error and hide the image
         imgElement.onerror = function() {
             imgElement.style.display = 'none';
             errorMsg.style.display = 'block';
         }
-
-        // Trigger the load
+        
         imgElement.src = imgPath;
     }
 </script>
