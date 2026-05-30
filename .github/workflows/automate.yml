@@ -4,18 +4,24 @@ name: Generate FFG Graphics
 on:
   schedule:
     - cron: '0 3,15 * * *'
-  workflow_dispatch: # Allows you to click a "Run Now" button manually to test it!
+  workflow_dispatch:
+
+# CRITICAL FIX: Grants the Action permission to push the images to your repo
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+    # Updated to v4 to fix the Node.js warning
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
+    # Updated to v5 to fix the Node.js warning
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
