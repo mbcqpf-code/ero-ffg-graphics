@@ -3,7 +3,7 @@ name: Generate FFG Graphics
 # Run at 03:00z and 15:00z every day
 on:
   schedule:
-    - cron: '15 3,4,9,10,15,16,21,22 * * *'
+    - cron: '13 3,4,9,10,15,16,21,22 * * *'
   workflow_dispatch:
 
 # CRITICAL FIX: Grants the Action permission to push the images to your repo
