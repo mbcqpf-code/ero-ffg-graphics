@@ -454,7 +454,7 @@
         imgElement.src = imgPath;
     }
 
-    // --- VERIFICATION LOGIC ---
+// --- VERIFICATION LOGIC ---
     function loadVerification() {
         let rawDate = document.getElementById('verif-date').value;
         if (!rawDate) return;
@@ -475,7 +475,8 @@
         let wpcUrl = `https://www.wpc.ncep.noaa.gov/verification/ero_verif_updated/images/${endStr}12/wpc_ero_verifall_${startStr}12f024.png`;
         
         let archive12zD1 = `archive/${startStr}_12z_day1.png`;
-        let archive00zD1 = `archive/${endStr}_00z_day1.png`;
+        // CORRECTED: Now uses startStr (the day prior) instead of endStr
+        let archive00zD1 = `archive/${startStr}_00z_day1.png`; 
         let archive12zD2 = `archive/${prevStr}_12z_day2.png`;
 
         loadSafeImage('verif-wpc-img', wpcUrl, 'WPC Verification Plot Unavailable');
@@ -484,7 +485,8 @@
         loadSafeImage('verif-12z-d2-img', archive12zD2, 'Archive Data Unavailable');
 
         document.getElementById('lbl-12z-d1').innerText = `12z Day 1 (Run: ${startStr} 12z)`;
-        document.getElementById('lbl-00z-d1').innerText = `00z Day 1 (Run: ${endStr} 00z)`;
+        // CORRECTED: Label now correctly displays the prior day's date
+        document.getElementById('lbl-00z-d1').innerText = `00z Day 1 (Run: ${startStr} 00z)`;
         document.getElementById('lbl-12z-d2').innerText = `12z Day 2 (Run: ${prevStr} 12z)`;
 
         document.getElementById('verif-display-card').style.display = 'block';
