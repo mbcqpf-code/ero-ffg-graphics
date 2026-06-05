@@ -11,7 +11,7 @@ import requests
 import time
 import warnings
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import scipy.ndimage as ndimage
 import cfgrib
 
@@ -36,7 +36,8 @@ def get_fxx_range(cycle, target_day):
     return None, None
 
 def get_latest_href_run(target_day):
-    now = datetime.utcnow()
+    # FORCE strict UTC time to prevent local server timezone bugs
+    now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
     url = "https://nomads.ncep.noaa.gov/cgi-bin/filter_hrefconus.pl"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -78,7 +79,8 @@ def get_rrfs_fxx_range(cycle, target_day):
     return None, None
 
 def get_latest_rrfs_run(target_day):
-    now = datetime.utcnow()
+    # FORCE strict UTC time
+    now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
     base_url = "https://noaa-rrfs-pds.s3.amazonaws.com"
 
@@ -214,9 +216,10 @@ for target_day in [1, 2]:
 
             time.sleep(1)
 
+        # LOCK THE EXACT DATE TO THE DICTIONARY
         href_results[target_day] = {
             'max': max_ffg_grid, 'lats': lats, 'lons': lons,
-            'cycle': cycle, 'status': status
+            'cycle': cycle, 'status': status, 'date': today_date
         }
     except ValueError as e:
         print(f"  -> {e} Skipping Day {target_day}...")
@@ -275,9 +278,10 @@ for target_day in [1, 2]:
                     else: max_ffg_grid = np.maximum(max_ffg_grid, hour_max)
             except: pass
 
+        # LOCK THE EXACT DATE TO THE DICTIONARY
         refs_results[target_day] = {
             'max': max_ffg_grid, 'lats': lats, 'lons': lons,
-            'cycle': cycle, 'status': status
+            'cycle': cycle, 'status': status, 'date': date_str
         }
     except ValueError as e:
         print(f"  -> {e} Skipping Day {target_day}...")
@@ -310,6 +314,7 @@ if href_results and refs_results:
         # --- PLOT HEAVILY SMOOTHED HREF ---
         h_max_raw, h_lats, h_lons = href.get('max'), href.get('lats'), href.get('lons')
         h_cycle, h_stat = href.get('cycle', 0), href.get('status', 'Unknown')
+        h_date = href.get('date', 'UNKNOWN_DATE') # Securely extracted date
         h_max_smooth = apply_heavy_smoothing(h_max_raw)
 
         if h_max_smooth is not None and np.nanmax(h_max_smooth) >= 5:
@@ -318,12 +323,14 @@ if href_results and refs_results:
             axes[0].text(0.5, 0.5, "NO FLASH FLOOD THREAT\nOR DATA UNAVAILABLE",
                          transform=axes[0].transAxes, fontsize=25, color='red', alpha=0.3, fontweight='bold', ha='center', va='center')
 
-        axes[0].set_title(f"HREF {h_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({h_stat})",
+        # Date added directly to the title
+        axes[0].set_title(f"HREF {h_date} {h_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({h_stat})",
                           fontsize=16, loc='left', fontweight='bold')
 
         # --- PLOT HEAVILY SMOOTHED REFS ---
         r_max_raw, r_lats, r_lons = refs.get('max'), refs.get('lats'), refs.get('lons')
         r_cycle, r_stat = refs.get('cycle', 0), refs.get('status', 'Unknown')
+        r_date = refs.get('date', 'UNKNOWN_DATE') # Securely extracted date
         r_max_smooth = apply_heavy_smoothing(r_max_raw)
 
         if r_max_smooth is not None and np.nanmax(r_max_smooth) >= 5:
@@ -332,7 +339,8 @@ if href_results and refs_results:
             axes[1].text(0.5, 0.5, "NO FLASH FLOOD THREAT\nOR DATA UNAVAILABLE",
                          transform=axes[1].transAxes, fontsize=25, color='red', alpha=0.3, fontweight='bold', ha='center', va='center')
 
-        axes[1].set_title(f"REFS {r_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({r_stat})",
+        # Date added directly to the title
+        axes[1].set_title(f"REFS {r_date} {r_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({r_stat})",
                           fontsize=16, loc='left', fontweight='bold')
 
         # --- COLORBAR & FORMATTING ---
@@ -345,12 +353,12 @@ if href_results and refs_results:
 
         plt.subplots_adjust(bottom=0.15, wspace=0.05)
         
-# Save output and clear memory
+        # Save output and clear memory
         archive_dir = Path("archive")
         archive_dir.mkdir(exist_ok=True)
-        
-        # 1. Save the Archive Copy
-        archive_filename = f"archive/{date_str}_{h_cycle:02d}z_day{day}.png"
+         
+        # 1. Save the Archive Copy (using securely extracted h_date to prevent mismatches)
+        archive_filename = f"archive/{h_date}_{h_cycle:02d}z_day{day}.png"
         plt.savefig(archive_filename, bbox_inches='tight', dpi=150)
         
         # 2. Save the Latest Copy
@@ -359,5 +367,6 @@ if href_results and refs_results:
         
         print(f"Saved {latest_filename} and archived as {archive_filename}")
         plt.close(fig) # Prevent memory leaks in Github Actions
+
 else:
     print("Missing data: Processing failed for one or both models.")
