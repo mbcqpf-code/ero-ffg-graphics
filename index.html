@@ -111,7 +111,7 @@
             .grid-2x2 { grid-template-columns: 1fr; }
         }
 
-        /* Images - Added hover effect and pointer cursor */
+        /* Images - Hover effect and pointer cursor */
         img {
             max-width: 100%;
             height: auto;
@@ -161,17 +161,6 @@
         }
         .controls-btn:hover { background-color: var(--primary-blue); }
         
-        .error-msg {
-            display: none;
-            color: #D8000C;
-            background-color: #FFD2D2;
-            padding: 15px;
-            border-radius: 4px;
-            margin-top: 20px;
-            font-weight: bold;
-            text-align: center;
-        }
-
         /* Modal (Lightbox) Background */
         .modal {
             display: none;
@@ -196,10 +185,10 @@
             border-radius: 8px;
             box-shadow: 0 8px 16px rgba(0,0,0,0.5);
             object-fit: contain;
-            cursor: default; /* Reset cursor so it doesn't look clickable when expanded */
+            cursor: default; 
         }
         .modal-content:hover {
-            opacity: 1; /* Disable hover dimming when expanded */
+            opacity: 1; 
         }
 
         /* Close Button */
@@ -228,6 +217,7 @@
     <p>Automated Operational Comparison Tool</p>
 </header>
 
+<!-- MAIN NAVIGATION -->
 <div class="main-nav">
     <button id="nav-live" class="main-nav-btn active" onclick="switchMainTab('live')">Live Guidance</button>
     <button id="nav-archive" class="main-nav-btn" onclick="switchMainTab('archive')">Event Archive</button>
@@ -236,17 +226,28 @@
 
 <div class="container">
 
+    <!-- ========================================= -->
+    <!-- VIEW 1: LIVE GUIDANCE                     -->
+    <!-- ========================================= -->
     <div id="view-live">
         <div class="tab-controls">
             <button id="btn-day1" class="tab-btn" onclick="setTargetDay(1)">View Day 1 Threat</button>
             <button id="btn-day2" class="tab-btn" onclick="setTargetDay(2)">View Day 2 Threat</button>
         </div>
 
+        <!-- PROBABILITIES CARD -->
         <div class="card">
-            <h3 id="automated-title">HREF vs REFS FFG Exceedance</h3>
+            <h3 id="automated-title">HREF vs REFS FFG Exceedance Probabilities</h3>
             <img id="automated-latest-img" src="" alt="Latest FFG Exceedance" onclick="openModal(this.src)">
         </div>
 
+        <!-- NEW PMM CARD -->
+        <div class="card">
+            <h3 id="pmm-title">HREF PMM Ratio & Fractional Coverage</h3>
+            <img id="automated-pmm-img" src="" alt="Latest PMM Data" onclick="openModal(this.src)">
+        </div>
+
+        <!-- CSU ML CARD -->
         <div class="card">
             <h3 id="csu-title">CSU Machine Learning ERO</h3>
             <img id="csu-ml-img" class="csu-img" src="" alt="CSU ML ERO" onclick="openModal(this.src)">
@@ -254,6 +255,9 @@
         </div>
     </div>
 
+    <!-- ========================================= -->
+    <!-- VIEW 2: HISTORICAL ARCHIVE                -->
+    <!-- ========================================= -->
     <div id="view-archive" style="display: none;">
         <h2 class="section-title">Historical Event Archive</h2>
         <div class="archive-controls">
@@ -274,15 +278,22 @@
                 <option value="2">Day 2</option>
             </select>
 
-            <button class="controls-btn" onclick="loadArchive()">Load Archived Graphic</button>
+            <button class="controls-btn" onclick="loadArchive()">Load Archived Graphics</button>
         </div>
 
+        <!-- Both images load into this single container -->
         <div class="card" id="archive-display-card" style="display: none;">
-            <div id="archive-error-msg" class="error-msg">⚠️ No archived data found for this specific date and cycle.</div>
-            <img id="archive-img" src="" style="display: none;" alt="Archived Graphic" onclick="openModal(this.src)">
+            <h3 style="margin-top: 0;">Exceedance Probabilities</h3>
+            <img id="archive-img" src="" style="margin-bottom: 30px;" alt="Archived Probabilities Graphic" onclick="openModal(this.src)">
+            
+            <h3>PMM Ratio & Fractional Coverage</h3>
+            <img id="archive-pmm-img" src="" alt="Archived PMM Graphic" onclick="openModal(this.src)">
         </div>
     </div>
 
+    <!-- ========================================= -->
+    <!-- VIEW 3: VERIFICATION DASHBOARD            -->
+    <!-- ========================================= -->
     <div id="view-verif" style="display: none;">
         <h2 class="section-title">ERO Verification Dashboard</h2>
         <div class="archive-controls">
@@ -293,28 +304,44 @@
 
         <div id="verif-display-card" style="display: none;">
             <div class="grid-2x2">
+                <!-- WPC OFFICIAL VERIFICATION -->
                 <div class="card">
                     <h3 style="color: #A52A2A;">Official WPC Verification</h3>
                     <p style="font-size: 14px; color: gray;">24-hr ERO Period Ending 12z</p>
                     <img id="verif-wpc-img" src="" alt="WPC Verification" onclick="openModal(this.src)">
                 </div>
                 
+                <!-- 12z DAY 1 -->
                 <div class="card">
                     <h3 id="lbl-12z-d1">12z Day 1</h3>
-                    <p style="font-size: 14px; color: gray;">24-hr Lead Time</p>
+                    
+                    <p style="font-size: 14px; color: gray; font-weight: bold; margin: 5px 0;">Exceedance Probabilities</p>
                     <img id="verif-12z-d1-img" src="" alt="12z Day 1 Run" onclick="openModal(this.src)">
+                    
+                    <p style="font-size: 14px; color: gray; font-weight: bold; margin: 20px 0 5px 0;">PMM Ratio & Coverage</p>
+                    <img id="verif-12z-d1-pmm-img" src="" alt="12z Day 1 PMM" onclick="openModal(this.src)">
                 </div>
                 
+                <!-- 00z DAY 1 -->
                 <div class="card">
                     <h3 id="lbl-00z-d1">00z Day 1</h3>
-                    <p style="font-size: 14px; color: gray;">36-hr Lead Time</p>
+                    
+                    <p style="font-size: 14px; color: gray; font-weight: bold; margin: 5px 0;">Exceedance Probabilities</p>
                     <img id="verif-00z-d1-img" src="" alt="00z Day 1 Run" onclick="openModal(this.src)">
+                    
+                    <p style="font-size: 14px; color: gray; font-weight: bold; margin: 20px 0 5px 0;">PMM Ratio & Coverage</p>
+                    <img id="verif-00z-d1-pmm-img" src="" alt="00z Day 1 PMM" onclick="openModal(this.src)">
                 </div>
                 
+                <!-- 12z DAY 2 -->
                 <div class="card">
                     <h3 id="lbl-12z-d2">12z Day 2</h3>
-                    <p style="font-size: 14px; color: gray;">48-hr Lead Time</p>
+                    
+                    <p style="font-size: 14px; color: gray; font-weight: bold; margin: 5px 0;">Exceedance Probabilities</p>
                     <img id="verif-12z-d2-img" src="" alt="12z Day 2 Run" onclick="openModal(this.src)">
+                    
+                    <p style="font-size: 14px; color: gray; font-weight: bold; margin: 20px 0 5px 0;">PMM Ratio & Coverage</p>
+                    <img id="verif-12z-d2-pmm-img" src="" alt="12z Day 2 PMM" onclick="openModal(this.src)">
                 </div>
             </div>
         </div>
@@ -322,6 +349,9 @@
 
 </div>
 
+<!-- ========================================= -->
+<!-- IMAGE LIGHTBOX MODAL                      -->
+<!-- ========================================= -->
 <div id="img-modal" class="modal" onclick="closeModal()">
     <span class="close-modal">&times;</span>
     <img class="modal-content" id="expanded-img">
@@ -343,9 +373,7 @@
 
     // --- MODAL / LIGHTBOX LOGIC ---
     function openModal(imgSrc) {
-        // Prevent opening the modal if it's just the gray placeholder text
         if (imgSrc.includes('via.placeholder.com')) return;
-        
         let modal = document.getElementById("img-modal");
         let modalImg = document.getElementById("expanded-img");
         modal.style.display = "block";
@@ -384,11 +412,14 @@
         document.getElementById('btn-day1').classList.toggle('active', day === 1);
         document.getElementById('btn-day2').classList.toggle('active', day === 2);
         
-        document.getElementById('automated-title').innerText = `HREF vs REFS FFG Exceedance (Day ${day})`;
+        document.getElementById('automated-title').innerText = `HREF vs REFS FFG Exceedance Probabilities (Day ${day})`;
+        document.getElementById('pmm-title').innerText = `HREF PMM Ratio & Fractional Coverage (Day ${day})`;
         document.getElementById('csu-title').innerText = `CSU Machine Learning ERO (Day ${day})`;
 
         let cacheBuster = new Date().getTime();
         loadSafeImage('automated-latest-img', `day${day}_latest.png?v=${cacheBuster}`, 'Awaiting Next Automated Run...');
+        loadSafeImage('automated-pmm-img', `day${day}_pmm_latest.png?v=${cacheBuster}`, 'Awaiting PMM Data...');
+        
         updateCSUImage();
     }
 
@@ -435,26 +466,15 @@
         
         let formattedDate = rawDate.replace(/-/g, '');
         let imgPath = `archive/${formattedDate}_${cycleVal}z_day${dayVal}.png`;
+        let pmmPath = `archive/${formattedDate}_${cycleVal}z_day${dayVal}_pmm.png`;
         
-        let cardContainer = document.getElementById('archive-display-card');
-        let imgElement = document.getElementById('archive-img');
-        let errorMsg = document.getElementById('archive-error-msg');
+        document.getElementById('archive-display-card').style.display = 'block';
 
-        cardContainer.style.display = 'block';
-
-        imgElement.onload = function() {
-            imgElement.style.display = 'block';
-            errorMsg.style.display = 'none';
-        }
-        imgElement.onerror = function() {
-            imgElement.style.display = 'none';
-            errorMsg.style.display = 'block';
-        }
-        
-        imgElement.src = imgPath;
+        loadSafeImage('archive-img', imgPath, 'Archive Data Unavailable');
+        loadSafeImage('archive-pmm-img', pmmPath, 'PMM Archive Unavailable');
     }
 
-// --- VERIFICATION LOGIC ---
+    // --- VERIFICATION LOGIC ---
     function loadVerification() {
         let rawDate = document.getElementById('verif-date').value;
         if (!rawDate) return;
@@ -472,20 +492,31 @@
         let startStr = getYYYYMMDD(startDate);
         let prevStr = getYYYYMMDD(prevDate);
 
+        // URLs for the 3 probability maps
         let wpcUrl = `https://www.wpc.ncep.noaa.gov/verification/ero_verif_updated/images/${endStr}12/wpc_ero_verifall_${startStr}12f024.png`;
-        
         let archive12zD1 = `archive/${startStr}_12z_day1.png`;
-        // CORRECTED: Now uses startStr (the day prior) instead of endStr
         let archive00zD1 = `archive/${startStr}_00z_day1.png`; 
         let archive12zD2 = `archive/${prevStr}_12z_day2.png`;
 
-        loadSafeImage('verif-wpc-img', wpcUrl, 'WPC Verification Plot Unavailable');
-        loadSafeImage('verif-12z-d1-img', archive12zD1, 'Archive Data Unavailable');
-        loadSafeImage('verif-00z-d1-img', archive00zD1, 'Archive Data Unavailable');
-        loadSafeImage('verif-12z-d2-img', archive12zD2, 'Archive Data Unavailable');
+        // URLs for the 3 PMM maps
+        let archive12zD1_pmm = `archive/${startStr}_12z_day1_pmm.png`;
+        let archive00zD1_pmm = `archive/${startStr}_00z_day1_pmm.png`; 
+        let archive12zD2_pmm = `archive/${prevStr}_12z_day2_pmm.png`;
 
+        // Push images safely
+        loadSafeImage('verif-wpc-img', wpcUrl, 'WPC Verification Plot Unavailable');
+        
+        loadSafeImage('verif-12z-d1-img', archive12zD1, 'Probabilities Unavailable');
+        loadSafeImage('verif-12z-d1-pmm-img', archive12zD1_pmm, 'PMM Unavailable');
+        
+        loadSafeImage('verif-00z-d1-img', archive00zD1, 'Probabilities Unavailable');
+        loadSafeImage('verif-00z-d1-pmm-img', archive00zD1_pmm, 'PMM Unavailable');
+        
+        loadSafeImage('verif-12z-d2-img', archive12zD2, 'Probabilities Unavailable');
+        loadSafeImage('verif-12z-d2-pmm-img', archive12zD2_pmm, 'PMM Unavailable');
+
+        // Update Text Labels dynamically
         document.getElementById('lbl-12z-d1').innerText = `12z Day 1 (Run: ${startStr} 12z)`;
-        // CORRECTED: Label now correctly displays the prior day's date
         document.getElementById('lbl-00z-d1').innerText = `00z Day 1 (Run: ${startStr} 00z)`;
         document.getElementById('lbl-12z-d2').innerText = `12z Day 2 (Run: ${prevStr} 12z)`;
 
@@ -494,11 +525,18 @@
 
     // --- INITIALIZE THE PAGE ON LOAD ---
     let today = new Date();
-    document.getElementById('archive-date').valueAsDate = today;
     
-    let yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    document.getElementById('verif-date').valueAsDate = yesterday;
+    let utcYear = today.getUTCFullYear();
+    let utcMonth = String(today.getUTCMonth() + 1).padStart(2, '0');
+    let utcDay = String(today.getUTCDate()).padStart(2, '0');
+    document.getElementById('archive-date').value = `${utcYear}-${utcMonth}-${utcDay}`;
+    
+    let yesterday = new Date(today.getTime());
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    let yYear = yesterday.getUTCFullYear();
+    let yMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+    let yDay = String(yesterday.getUTCDate()).padStart(2, '0');
+    document.getElementById('verif-date').value = `${yYear}-${yMonth}-${yDay}`;
 
     setTargetDay(1); 
 </script>
