@@ -264,6 +264,7 @@
             <div class="segmented-control">
                 <button id="btn-live-prob" class="seg-btn active" onclick="setProductType('prob')">Probabilities</button>
                 <button id="btn-live-pmm" class="seg-btn" onclick="setProductType('pmm')">PMM Ratio & Coverage</button>
+                <button id="btn-live-qpf" class="seg-btn" onclick="setProductType('qpf')">24-hr QPF Thresholds</button>
             </div>
         </div>
 
@@ -310,6 +311,7 @@
                 <div class="segmented-control">
                     <button id="btn-arch-prob" class="seg-btn active" onclick="setProductType('prob')">Probabilities</button>
                     <button id="btn-arch-pmm" class="seg-btn" onclick="setProductType('pmm')">PMM Ratio & Coverage</button>
+                    <button id="btn-arch-qpf" class="seg-btn" onclick="setProductType('qpf')">24-hr QPF Thresholds</button>
                 </div>
             </div>
 
@@ -337,6 +339,7 @@
                 <div class="segmented-control">
                     <button id="btn-verif-prob" class="seg-btn active" onclick="setProductType('prob')">View Probabilities</button>
                     <button id="btn-verif-pmm" class="seg-btn" onclick="setProductType('pmm')">View PMM Ratio & Coverage</button>
+                    <button id="btn-verif-qpf" class="seg-btn" onclick="setProductType('qpf')">View 24-hr QPF Thresholds</button>
                 </div>
             </div>
 
@@ -385,7 +388,7 @@
 <script>
     // --- GLOBAL STATE VARIABLES ---
     let currentTargetDay = 1;
-    let currentProduct = 'prob'; // Options: 'prob' or 'pmm'
+    let currentProduct = 'prob'; // Options: 'prob', 'pmm', 'qpf'
 
     // --- BULLETPROOF IMAGE LOADER ---
     function loadSafeImage(imgId, targetSrc, fallbackText) {
@@ -436,6 +439,7 @@
         ['live', 'arch', 'verif'].forEach(prefix => {
             document.getElementById(`btn-${prefix}-prob`).classList.toggle('active', type === 'prob');
             document.getElementById(`btn-${prefix}-pmm`).classList.toggle('active', type === 'pmm');
+            document.getElementById(`btn-${prefix}-qpf`).classList.toggle('active', type === 'qpf');
         });
 
         // Trigger updates based on which sections are currently visible
@@ -469,9 +473,12 @@
         if (currentProduct === 'prob') {
             titleEl.innerText = `HREF vs REFS FFG Exceedance Probabilities (Day ${currentTargetDay})`;
             loadSafeImage('main-product-img', `day${currentTargetDay}_latest.png?v=${cacheBuster}`, 'Awaiting Probabilities Run...');
-        } else {
+        } else if (currentProduct === 'pmm') {
             titleEl.innerText = `HREF PMM Ratio & Fractional Coverage (Day ${currentTargetDay})`;
             loadSafeImage('main-product-img', `day${currentTargetDay}_pmm_latest.png?v=${cacheBuster}`, 'Awaiting PMM Run...');
+        } else {
+            titleEl.innerText = `HREF 24-hr QPF: 1" EAS & 3" NEP (Day ${currentTargetDay})`;
+            loadSafeImage('main-product-img', `day${currentTargetDay}_qpf_latest.png?v=${cacheBuster}`, 'Awaiting QPF Run...');
         }
     }
 
@@ -510,14 +517,21 @@
         
         document.getElementById('archive-display-card').style.display = 'block';
 
-        let targetFile = currentProduct === 'prob' 
-            ? `archive/${formattedDate}_${cycleVal}z_day${dayVal}.png`
-            : `archive/${formattedDate}_${cycleVal}z_day${dayVal}_pmm.png`;
-            
-        document.getElementById('archive-product-title').innerText = currentProduct === 'prob' 
-            ? `Exceedance Probabilities` 
-            : `PMM Ratio & Fractional Coverage`;
+        let targetFile = '';
+        let targetTitle = '';
 
+        if (currentProduct === 'prob') {
+            targetFile = `archive/${formattedDate}_${cycleVal}z_day${dayVal}.png`;
+            targetTitle = 'Exceedance Probabilities';
+        } else if (currentProduct === 'pmm') {
+            targetFile = `archive/${formattedDate}_${cycleVal}z_day${dayVal}_pmm.png`;
+            targetTitle = 'PMM Ratio & Fractional Coverage';
+        } else {
+            targetFile = `archive/${formattedDate}_${cycleVal}z_day${dayVal}_qpf.png`;
+            targetTitle = '24-hr QPF Thresholds (EAS & NEP)';
+        }
+            
+        document.getElementById('archive-product-title').innerText = targetTitle;
         loadSafeImage('archive-product-img', targetFile, 'Archive Data Unavailable');
     }
 
@@ -542,8 +556,18 @@
         let wpcUrl = `https://www.wpc.ncep.noaa.gov/verification/ero_verif_updated/images/${endStr}12/wpc_ero_verifall_${startStr}12f024.png`;
         loadSafeImage('verif-wpc-img', wpcUrl, 'WPC Verification Plot Unavailable');
 
-        let suffix = currentProduct === 'prob' ? '.png' : '_pmm.png';
-        let subText = currentProduct === 'prob' ? 'Exceedance Probabilities' : 'PMM Ratio & Coverage';
+        let suffix = '';
+        let subText = '';
+        if (currentProduct === 'prob') {
+            suffix = '.png';
+            subText = 'Exceedance Probabilities';
+        } else if (currentProduct === 'pmm') {
+            suffix = '_pmm.png';
+            subText = 'PMM Ratio & Coverage';
+        } else {
+            suffix = '_qpf.png';
+            subText = '24-hr QPF Thresholds';
+        }
 
         loadSafeImage('verif-12z-d1-img', `archive/${startStr}_12z_day1${suffix}`, 'Data Unavailable');
         loadSafeImage('verif-00z-d1-img', `archive/${startStr}_00z_day1${suffix}`, 'Data Unavailable');
