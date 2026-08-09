@@ -1,6 +1,7 @@
 import matplotlib
 matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from matplotlib.colors import ListedColormap, BoundaryNorm
@@ -140,6 +141,7 @@ def apply_heavy_smoothing(grid, sigma=5.0):
 href_results = {}
 refs_results = {}
 href_pmm_results = {}
+href_qpf_results = {}
 
 Path("href_downloads").mkdir(exist_ok=True)
 Path("refs_downloads").mkdir(exist_ok=True)
@@ -208,7 +210,6 @@ for target_day in [1, 2]:
         # B. HREF PMM QPF VS IEM FFG (RATIO & COVERAGE)
         # ----------------------------------------------------
         print(f"\n--- FETCHING IEM FFG & HREF PMM (DAY {target_day}) ---")
-        # 1. Download IEM FFG
         iem_date_path = cycle_dt.strftime('%Y/%m/%d')
         iem_file_time = cycle_dt.strftime('%Y%m%d%H')
         iem_ffg_url = f"https://mesonet.agron.iastate.edu/archive/data/{iem_date_path}/model/ffg/5kmffg_{iem_file_time}.grib2"
@@ -225,11 +226,10 @@ for target_day in [1, 2]:
         ffg_3h_da = ds_3h[var_name] / 25.4
         ffg_6h_da = ds_6h[var_name] / 25.4
 
-        # 2. Download PMM via Herbie
         run_date_herbie = cycle_dt.strftime("%Y-%m-%d %H:00")
         href_pmm_1hr_list = []
         for fxx in fxx_range:
-            if fxx == fxx_range[0]: continue # pmmn is hourly accumulation, skip the 0th index
+            if fxx == fxx_range[0]: continue 
             try:
                 H_pmm = Herbie(run_date_herbie, model="href", product="pmmn", domain="conus", fxx=fxx)
                 H_pmm.download()
@@ -242,7 +242,6 @@ for target_day in [1, 2]:
             lat_grid = qpf_1h_da.latitude.values
             lon_grid = qpf_1h_da.longitude.values
             
-            # 3. KDTree Alignment
             ffg_points = np.column_stack((ffg_1h_da.latitude.values.ravel(), ffg_1h_da.longitude.values.ravel()))
             tree = cKDTree(ffg_points)
             href_points = np.column_stack((lat_grid.ravel(), lon_grid.ravel()))
@@ -251,7 +250,6 @@ for target_day in [1, 2]:
             ffg_3h_aligned = ffg_3h_da.values.ravel()[indices].reshape(lat_grid.shape)
             ffg_6h_aligned = ffg_6h_da.values.ravel()[indices].reshape(lat_grid.shape)
 
-            # 4. Multi-Duration Calculations
             ratio_1h_max = np.zeros(lat_grid.shape)
             ratio_3h_max = np.zeros(lat_grid.shape)
             ratio_6h_max = np.zeros(lat_grid.shape)
@@ -273,11 +271,9 @@ for target_day in [1, 2]:
 
             max_ratio_overall = np.fmax(ratio_1h_max, np.fmax(ratio_3h_max, ratio_6h_max))
             
-            # Script 1: Masked Ratio
             max_ratio_40km = maximum_filter(max_ratio_overall, footprint=circular_footprint)
             ratio_masked = np.where(max_ratio_40km >= 0.75, max_ratio_40km, np.nan)
             
-            # Script 5: Fractional Coverage
             binary_exceedance = np.where(max_ratio_overall >= 1.0, 1.0, 0.0)
             coverage_grid = convolve(binary_exceedance, circular_footprint, mode='constant', cval=0.0)
             coverage_fraction = (coverage_grid / np.sum(circular_footprint)) * 100.0
@@ -289,11 +285,52 @@ for target_day in [1, 2]:
                 'cycle': cycle, 'date': today_date, 'status': status
             }
 
+        # ----------------------------------------------------
+        # C. NATIVE 24-HR QPF (1" EAS + 3" NEP)
+        # ----------------------------------------------------
+        print(f"\n--- FETCHING 24-HR QPF (DAY {target_day}) ---")
+        skip_qpf = False
+        if target_day == 1 and cycle == 18: skip_qpf = True
+        if target_day == 2 and cycle in [0, 6]: skip_qpf = True
+
+        if not skip_qpf:
+            try:
+                # Dynamic GRIB accumulation regex based on Cycle/Day
+                if target_day == 1:
+                    if cycle == 0: fxx_end, acc_regex = 36, r"12-36"
+                    elif cycle == 6: fxx_end, acc_regex = 30, r"6-30"
+                    elif cycle == 12: fxx_end, acc_regex = 24, r"(0-24|0-1.+)"
+                else:
+                    if cycle == 12: fxx_end, acc_regex = 48, r"(24-48|1-2.+)"
+                    elif cycle == 18: fxx_end, acc_regex = 42, r"18-42"
+                
+                H_eas = Herbie(run_date_herbie, model="href", product="eas", domain="conus", fxx=fxx_end)
+                H_prob = Herbie(run_date_herbie, model="href", product="prob", domain="conus", fxx=fxx_end)
+                
+                search_eas_1in = rf"APCP:surface:{acc_regex}.*:prob >25.4"
+                search_prob_3in = rf"APCP:surface:{acc_regex}.*:prob >76.2"
+
+                ds_eas_1in = H_eas.xarray(search_eas_1in)
+                ds_prob_3in = H_prob.xarray(search_prob_3in)
+                
+                eas_1in_vals = ds_eas_1in[list(ds_eas_1in.data_vars)[0]].values
+                nep_3in_vals = ds_prob_3in[list(ds_prob_3in.data_vars)[0]].values
+                
+                href_qpf_results[target_day] = {
+                    'eas': np.where(eas_1in_vals >= 15, eas_1in_vals, np.nan),
+                    'nep': nep_3in_vals,
+                    'lats': ds_eas_1in.latitude.values,
+                    'lons': ds_eas_1in.longitude.values,
+                    'cycle': cycle, 'date': today_date
+                }
+            except Exception as e:
+                print(f"  -> Failed 24-hr QPF for Day {target_day}: {e}")
+
     except ValueError as e:
         print(f"  -> {e} Skipping Day {target_day}...")
 
     # ----------------------------------------------------
-    # C. PPFFG REFS EXCEEDANCE PROBABILITIES
+    # D. PPFFG REFS EXCEEDANCE PROBABILITIES
     # ----------------------------------------------------
     print(f"\n--- PROCESSING REFS DAY {target_day} ---")
     try:
@@ -413,7 +450,6 @@ if href_results and refs_results:
                 ax.add_feature(cfeature.STATES, linewidth=0.5, edgecolor='gray')
                 ax.set_extent([-120, -70, 20, 50], crs=ccrs.PlateCarree())
 
-            # Left Panel: PMM Ratio
             ratio_levels = [0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
             ratio_colors = ['#ffff00', '#ffa500', '#ff0000', '#8b0000', '#ff00ff', '#800080', '#0000ff', '#00ffff']
             cf_ratio = axes_pmm[0].contourf(pmm['lons'], pmm['lats'], pmm['ratio'], levels=ratio_levels, colors=ratio_colors, transform=ccrs.PlateCarree(), alpha=0.9, extend='max')
@@ -421,7 +457,6 @@ if href_results and refs_results:
             cbar_ratio = plt.colorbar(cf_ratio, ax=axes_pmm[0], orientation='horizontal', pad=0.03, shrink=0.8, aspect=40)
             cbar_ratio.set_label('Exceedance Ratio (QPF / FFG)', fontsize=12, fontweight='bold')
 
-            # Right Panel: Fractional Coverage
             coverage_levels = [1, 5, 10, 25, 50, 75, 100]
             coverage_colors = ['#e0f7fa', '#c8e6c9', '#fff59d', '#ffb74d', '#f44336', '#9c27b0'] 
             cf_cov = axes_pmm[1].contourf(pmm['lons'], pmm['lats'], pmm['coverage'], levels=coverage_levels, colors=coverage_colors, transform=ccrs.PlateCarree(), alpha=0.9, extend='max')
@@ -430,11 +465,48 @@ if href_results and refs_results:
             cbar_cov.set_label('Areal Coverage Percentage (%)', fontsize=12, fontweight='bold')
             
             plt.subplots_adjust(bottom=0.05, wspace=0.05)
-            
-            # Save the new PMM graphics alongside the existing ones
             plt.savefig(f"archive/{pmm['date']}_{pmm['cycle']:02d}z_day{day}_pmm.png", bbox_inches='tight', dpi=150)
             plt.savefig(f"day{day}_pmm_latest.png", bbox_inches='tight', dpi=150)
             plt.close(fig_pmm)
+
+        # --- GRAPHIC 3: DUAL-SIGNAL 24-HR QPF ---
+        if day in href_qpf_results:
+            qpf = href_qpf_results[day]
+            fig_qpf, ax_qpf = plt.subplots(1, 1, figsize=(14, 10), subplot_kw={'projection': proj})
+            ax_qpf.add_feature(cfeature.COASTLINE, linewidth=1.0)
+            ax_qpf.add_feature(cfeature.BORDERS, linewidth=1.0)
+            ax_qpf.add_feature(cfeature.STATES, linewidth=0.5, edgecolor='gray')
+            ax_qpf.set_extent([-120, -70, 20, 50], crs=ccrs.PlateCarree())
+
+            eas_levels = [15, 30, 50, 70, 90, 100]
+            eas_colors = ["#c8e6c9", "#fff59d", "#ffb74d", "#ff8a65", "#d32f2f"]
+            cf_eas = ax_qpf.contourf(qpf['lons'], qpf['lats'], qpf['eas'], levels=eas_levels, colors=eas_colors, transform=ccrs.PlateCarree(), alpha=0.85)
+
+            nep_levels = [15, 40, 70]
+            nep_colors = ["#6a1b9a", "#e91e63", "#000000"]
+            cs_nep = ax_qpf.contour(qpf['lons'], qpf['lats'], qpf['nep'], levels=nep_levels, colors=nep_colors, linewidths=1.2, transform=ccrs.PlateCarree())
+
+            cbar_eas = plt.colorbar(cf_eas, ax=ax_qpf, orientation="horizontal", pad=0.03, shrink=0.7, aspect=40)
+            cbar_eas.set_label('Native 1" EAS Probability (%) [Filled Contours]', fontsize=12, fontweight="bold")
+
+            custom_lines = [Line2D([0], [0], color=c, lw=1.5) for c in nep_colors]
+            legend = ax_qpf.legend(custom_lines, [f"{lvl}%" for lvl in nep_levels], title='3" NEP (Lines)', loc="lower right", framealpha=0.95, fontsize=11, title_fontsize=12)
+            legend.get_frame().set_edgecolor("black")
+
+            ax_qpf.set_title(f"HREF {qpf['date']} {qpf['cycle']:02d}z: 1\" EAS Coverage + 3\" NEP Magnitude\nValid: Day {day} 24-hr QPF", fontsize=16, fontweight="bold", loc="left")
+            
+            plt.savefig(f"archive/{qpf['date']}_{qpf['cycle']:02d}z_day{day}_qpf.png", bbox_inches='tight', dpi=150)
+            plt.savefig(f"day{day}_qpf_latest.png", bbox_inches='tight', dpi=150)
+            plt.close(fig_qpf)
+        else:
+            # Generate the graceful fallback image directly via matplotlib
+            if h_cycle != 0: # Ensure we actually ran this cycle
+                fig_blank, ax_blank = plt.subplots(figsize=(14, 10))
+                ax_blank.text(0.5, 0.5, f"NO 24-HR QPF AVAILABLE\nDay {day} is a partial period for the {h_cycle:02d}z cycle.", fontsize=25, color='gray', alpha=0.5, fontweight='bold', ha='center', va='center')
+                ax_blank.axis('off')
+                plt.savefig(f"archive/{h_date}_{h_cycle:02d}z_day{day}_qpf.png", bbox_inches='tight', dpi=150)
+                plt.savefig(f"day{day}_qpf_latest.png", bbox_inches='tight', dpi=150)
+                plt.close(fig_blank)
 
 else:
     print("Missing data: Processing failed for one or both models.")
