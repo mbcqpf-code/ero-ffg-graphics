@@ -1,7 +1,11 @@
-xarray
-cfgrib
-requests
 matplotlib
 cartopy
-scipy
 numpy
+xarray
+netCDF4
+requests
+scipy
+ecmwflibs
+eccodes
+cfgrib
+herbie-data
