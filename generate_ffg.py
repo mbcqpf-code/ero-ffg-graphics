@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use('Agg') # CRITICAL for headless GitHub Actions servers
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -9,20 +9,29 @@ import numpy as np
 import xarray as xr
 import requests
 import time
+import os
+import urllib.request
 import warnings
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import scipy.ndimage as ndimage
+from scipy.ndimage import maximum_filter, convolve
+from scipy.spatial import cKDTree
+from herbie import Herbie
 import cfgrib
 
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# 1. HELPER FUNCTIONS
+# 1. HELPER FUNCTIONS & MASTER CONFIG
 # ==========================================
+GRID_RES_KM = 3.0
+NEIGHBORHOOD_KM = 40.0
+radius_pts = int(NEIGHBORHOOD_KM / GRID_RES_KM)
+y_grid, x_grid = np.ogrid[-radius_pts : radius_pts + 1, -radius_pts : radius_pts + 1]
+circular_footprint = x_grid**2 + y_grid**2 <= radius_pts**2
 
 def get_fxx_range(cycle, target_day):
-    """Returns the forecast hours and the completion status for Day 1/Day 2 (HREF)."""
     if target_day == 1:
         if cycle == 0: return range(12, 37), "Full"
         elif cycle == 6: return range(6, 31), "Full"
@@ -36,7 +45,6 @@ def get_fxx_range(cycle, target_day):
     return None, None
 
 def get_latest_href_run(target_day):
-    # FORCE strict UTC time to prevent local server timezone bugs
     now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
     url = "https://nomads.ncep.noaa.gov/cgi-bin/filter_hrefconus.pl"
@@ -46,10 +54,9 @@ def get_latest_href_run(target_day):
         dt = current_cycle_time - timedelta(hours=6 * i)
         cycle = dt.hour
         date_str = dt.strftime("%Y%m%d")
-
         fxx_range, status = get_fxx_range(cycle, target_day)
         if fxx_range is None: continue
-
+        
         last_fxx = fxx_range[-1]
         file_name = f"href.t{cycle:02d}z.conus.ffri.f{last_fxx:02d}.grib2"
         dir_path = f"/href.{date_str}/ensprod"
@@ -59,13 +66,11 @@ def get_latest_href_run(target_day):
             response = requests.get(url, params=params, headers=headers, timeout=10)
             if response.status_code == 200 and len(response.content) > 1000:
                 print(f"✅ Locked in fully uploaded HREF run: Date={date_str}, Cycle={cycle:02d}z")
-                return date_str, cycle, fxx_range, status
+                return date_str, cycle, fxx_range, status, dt
         except: pass
-
     raise ValueError(f"Could not find fully uploaded HREF runs for Day {target_day}.")
 
 def get_rrfs_fxx_range(cycle, target_day):
-    """REFS runs out to 60 hours, so it ALWAYS has a full Day 2!"""
     if target_day == 1:
         if cycle == 0: return range(12, 37), "Full"
         elif cycle == 6: return range(6, 31), "Full"
@@ -79,7 +84,6 @@ def get_rrfs_fxx_range(cycle, target_day):
     return None, None
 
 def get_latest_rrfs_run(target_day):
-    # FORCE strict UTC time
     now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
     base_url = "https://noaa-rrfs-pds.s3.amazonaws.com"
@@ -88,7 +92,6 @@ def get_latest_rrfs_run(target_day):
         dt = current_cycle_time - timedelta(hours=6 * i)
         cycle = dt.hour
         date_str = dt.strftime("%Y%m%d")
-
         fxx_range, status = get_rrfs_fxx_range(cycle, target_day)
         if fxx_range is None: continue
         last_fxx = fxx_range[-1]
@@ -102,7 +105,6 @@ def get_latest_rrfs_run(target_day):
                 print(f"✅ Locked in fully uploaded REFS run: Date={date_str}, Cycle={cycle:02d}z")
                 return date_str, cycle, fxx_range, folder_path, base_url, status
         except: pass
-
     raise ValueError(f"Could not find fully uploaded REFS runs.")
 
 def download_aws_subset(grib_url, idx_url, search_str, local_file):
@@ -133,28 +135,24 @@ def apply_heavy_smoothing(grid, sigma=5.0):
     return smoothed_grid
 
 # ==========================================
-# 2. DATA PROCESSING (HREF & REFS)
+# 2. DATA PROCESSING LOOP
 # ==========================================
-
 href_results = {}
 refs_results = {}
+href_pmm_results = {}
 
-# Set up directories
-href_download_dir = Path("href_downloads")
-href_download_dir.mkdir(exist_ok=True)
-
-refs_download_dir = Path("refs_downloads")
-refs_download_dir.mkdir(exist_ok=True)
+Path("href_downloads").mkdir(exist_ok=True)
+Path("refs_downloads").mkdir(exist_ok=True)
+Path("ffg_data").mkdir(exist_ok=True)
 
 for target_day in [1, 2]:
-    # --- PROCESS HREF ---
+    # ----------------------------------------------------
+    # A. PPFFG HREF EXCEEDANCE PROBABILITIES
+    # ----------------------------------------------------
     print(f"\n--- PROCESSING HREF DAY {target_day} ---")
     try:
-        today_date, cycle, fxx_range, status = get_latest_href_run(target_day)
-        
-        max_ffg_grid = None
-        lats = None
-        lons = None
+        today_date, cycle, fxx_range, status, cycle_dt = get_latest_href_run(target_day)
+        max_ffg_grid, lats, lons = None, None, None
         ero_start_fxx = fxx_range[0]
 
         for fxx in fxx_range:
@@ -162,27 +160,21 @@ for target_day in [1, 2]:
             dir_path = f"/href.{today_date}/ensprod"
             url = "https://nomads.ncep.noaa.gov/cgi-bin/filter_hrefconus.pl"
             params = {"dir": dir_path, "file": file_name, "var_PPFFG": "on", "all_lev": "on"}
-            headers = {"User-Agent": "Mozilla/5.0"}
-            local_file = href_download_dir / f"{file_name}_subset"
+            local_file = Path("href_downloads") / f"{file_name}_subset"
 
             download_success = False
             for attempt in range(3):
                 try:
-                    response = requests.get(url, params=params, headers=headers, timeout=30)
+                    response = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
                     if response.status_code == 200 and len(response.content) > 1000:
                         with open(local_file, 'wb') as f: f.write(response.content)
                         download_success = True
                         break
-                    else:
-                        time.sleep(5) 
-                except:
-                    time.sleep(5)
+                    else: time.sleep(5) 
+                except: time.sleep(5)
+            if not download_success: continue
 
-            if not download_success:
-                print(f"  -> Skipping f{fxx:02d} (Download failed)")
-                continue
-
-            for idx_file in href_download_dir.glob('*.idx'):
+            for idx_file in Path("href_downloads").glob('*.idx'):
                 try: idx_file.unlink()
                 except: pass
 
@@ -191,15 +183,11 @@ for target_day in [1, 2]:
                 for N in [1, 3, 6]:
                     start_hour = fxx - N
                     if start_hour < ero_start_fxx: continue
-
                     target_step = f"{start_hour}-{fxx}"
                     try:
-                        ds_interval = xr.open_dataset(local_file, engine="cfgrib",
-                                                      backend_kwargs={'filter_by_keys': {'stepRange': target_step}})
+                        ds_interval = xr.open_dataset(local_file, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepRange': target_step}})
                         temp_data = ds_interval.ppffg.values
-                        if hour_max is None: hour_max = temp_data
-                        else: hour_max = np.maximum(hour_max, temp_data)
-
+                        hour_max = temp_data if hour_max is None else np.maximum(hour_max, temp_data)
                         if lats is None:
                             lats = ds_interval.latitude.values
                             lons = ds_interval.longitude.values
@@ -207,38 +195,117 @@ for target_day in [1, 2]:
                     except: continue
 
                 if hour_max is not None:
-                    if max_ffg_grid is None: max_ffg_grid = hour_max
-                    else: max_ffg_grid = np.maximum(max_ffg_grid, hour_max)
-                    print(f"  -> Processed f{fxx:02d}")
-
-            except Exception as e:
-                print(f"  -> Error on f{fxx:02d}: {e}")
-
+                    max_ffg_grid = hour_max if max_ffg_grid is None else np.maximum(max_ffg_grid, hour_max)
+            except: pass
             time.sleep(1)
 
-        # LOCK THE EXACT DATE TO THE DICTIONARY
         href_results[target_day] = {
             'max': max_ffg_grid, 'lats': lats, 'lons': lons,
             'cycle': cycle, 'status': status, 'date': today_date
         }
+
+        # ----------------------------------------------------
+        # B. HREF PMM QPF VS IEM FFG (RATIO & COVERAGE)
+        # ----------------------------------------------------
+        print(f"\n--- FETCHING IEM FFG & HREF PMM (DAY {target_day}) ---")
+        # 1. Download IEM FFG
+        iem_date_path = cycle_dt.strftime('%Y/%m/%d')
+        iem_file_time = cycle_dt.strftime('%Y%m%d%H')
+        iem_ffg_url = f"https://mesonet.agron.iastate.edu/archive/data/{iem_date_path}/model/ffg/5kmffg_{iem_file_time}.grib2"
+        local_ffg_path = f"ffg_data/5kmffg_{iem_file_time}.grib2"
+        
+        if not os.path.exists(local_ffg_path):
+            urllib.request.urlretrieve(iem_ffg_url, local_ffg_path)
+            
+        ds_1h = xr.open_dataset(local_ffg_path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepRange': '0-1'}})
+        ds_3h = xr.open_dataset(local_ffg_path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepRange': '0-3'}})
+        ds_6h = xr.open_dataset(local_ffg_path, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepRange': '0-6'}})
+        var_name = list(ds_1h.data_vars)[0]
+        ffg_1h_da = ds_1h[var_name] / 25.4
+        ffg_3h_da = ds_3h[var_name] / 25.4
+        ffg_6h_da = ds_6h[var_name] / 25.4
+
+        # 2. Download PMM via Herbie
+        run_date_herbie = cycle_dt.strftime("%Y-%m-%d %H:00")
+        href_pmm_1hr_list = []
+        for fxx in fxx_range:
+            if fxx == fxx_range[0]: continue # pmmn is hourly accumulation, skip the 0th index
+            try:
+                H_pmm = Herbie(run_date_herbie, model="href", product="pmmn", domain="conus", fxx=fxx)
+                H_pmm.download()
+                ds_pmm = xr.open_dataset(H_pmm.get_localFilePath(), engine="cfgrib", backend_kwargs={"filter_by_keys": {"shortName": "tp", "stepRange": f"{fxx-1}-{fxx}"}})
+                href_pmm_1hr_list.append(ds_pmm["tp"] / 25.4)
+            except: pass
+
+        if len(href_pmm_1hr_list) > 0:
+            qpf_1h_da = xr.concat(href_pmm_1hr_list, dim="time").fillna(0)
+            lat_grid = qpf_1h_da.latitude.values
+            lon_grid = qpf_1h_da.longitude.values
+            
+            # 3. KDTree Alignment
+            ffg_points = np.column_stack((ffg_1h_da.latitude.values.ravel(), ffg_1h_da.longitude.values.ravel()))
+            tree = cKDTree(ffg_points)
+            href_points = np.column_stack((lat_grid.ravel(), lon_grid.ravel()))
+            _, indices = tree.query(href_points)
+            ffg_1h_aligned = ffg_1h_da.values.ravel()[indices].reshape(lat_grid.shape)
+            ffg_3h_aligned = ffg_3h_da.values.ravel()[indices].reshape(lat_grid.shape)
+            ffg_6h_aligned = ffg_6h_da.values.ravel()[indices].reshape(lat_grid.shape)
+
+            # 4. Multi-Duration Calculations
+            ratio_1h_max = np.zeros(lat_grid.shape)
+            ratio_3h_max = np.zeros(lat_grid.shape)
+            ratio_6h_max = np.zeros(lat_grid.shape)
+
+            for t in range(qpf_1h_da.sizes['time']):
+                q1 = qpf_1h_da.isel(time=t).values
+                safe_ffg_1h = np.where(ffg_1h_aligned > 0, ffg_1h_aligned, np.nan)
+                with np.errstate(invalid='ignore', divide='ignore'): ratio_1h_max = np.fmax(ratio_1h_max, q1 / safe_ffg_1h)
+
+                if t >= 2:
+                    q3 = qpf_1h_da.isel(time=slice(t-2, t+1)).sum(dim='time').values
+                    safe_ffg_3h = np.where(ffg_3h_aligned > 0, ffg_3h_aligned, np.nan)
+                    with np.errstate(invalid='ignore', divide='ignore'): ratio_3h_max = np.fmax(ratio_3h_max, q3 / safe_ffg_3h)
+
+                if t >= 5:
+                    q6 = qpf_1h_da.isel(time=slice(t-5, t+1)).sum(dim='time').values
+                    safe_ffg_6h = np.where(ffg_6h_aligned > 0, ffg_6h_aligned, np.nan)
+                    with np.errstate(invalid='ignore', divide='ignore'): ratio_6h_max = np.fmax(ratio_6h_max, q6 / safe_ffg_6h)
+
+            max_ratio_overall = np.fmax(ratio_1h_max, np.fmax(ratio_3h_max, ratio_6h_max))
+            
+            # Script 1: Masked Ratio
+            max_ratio_40km = maximum_filter(max_ratio_overall, footprint=circular_footprint)
+            ratio_masked = np.where(max_ratio_40km >= 0.75, max_ratio_40km, np.nan)
+            
+            # Script 5: Fractional Coverage
+            binary_exceedance = np.where(max_ratio_overall >= 1.0, 1.0, 0.0)
+            coverage_grid = convolve(binary_exceedance, circular_footprint, mode='constant', cval=0.0)
+            coverage_fraction = (coverage_grid / np.sum(circular_footprint)) * 100.0
+            coverage_masked = np.where(coverage_fraction >= 1.0, coverage_fraction, np.nan)
+            
+            href_pmm_results[target_day] = {
+                'ratio': ratio_masked, 'coverage': coverage_masked,
+                'lats': lat_grid, 'lons': lon_grid,
+                'cycle': cycle, 'date': today_date, 'status': status
+            }
+
     except ValueError as e:
         print(f"  -> {e} Skipping Day {target_day}...")
 
-    # --- PROCESS REFS ---
+    # ----------------------------------------------------
+    # C. PPFFG REFS EXCEEDANCE PROBABILITIES
+    # ----------------------------------------------------
     print(f"\n--- PROCESSING REFS DAY {target_day} ---")
     try:
         date_str, cycle, fxx_range, folder_path, base_url, status = get_latest_rrfs_run(target_day)
-
-        max_ffg_grid = None
-        lats = None
-        lons = None
+        max_ffg_grid, lats, lons = None, None, None
         ero_start_fxx = fxx_range[0]
 
         for fxx in fxx_range:
             file_name = f"refs.t{cycle:02d}z.ffri.f{fxx:02d}.conus.grib2"
             grib_url = f"{base_url}{folder_path}/{file_name}"
             idx_url = f"{grib_url}.idx"
-            local_file = refs_download_dir / f"refs_subset_f{fxx:02d}.grib2"
+            local_file = Path("refs_downloads") / f"refs_subset_f{fxx:02d}.grib2"
 
             download_success = False
             for attempt in range(3):
@@ -246,10 +313,9 @@ for target_day in [1, 2]:
                     download_success = True
                     break
                 time.sleep(2)
-
             if not download_success: continue
 
-            for idx_file in refs_download_dir.glob('*.idx'):
+            for idx_file in Path("refs_downloads").glob('*.idx'):
                 try: idx_file.unlink()
                 except: pass
 
@@ -258,15 +324,11 @@ for target_day in [1, 2]:
                 for N in [1, 3, 6]:
                     start_hour = fxx - N
                     if start_hour < ero_start_fxx: continue
-
                     target_step = f"{start_hour}-{fxx}"
                     try:
-                        ds_interval = xr.open_dataset(local_file, engine="cfgrib",
-                                                      backend_kwargs={'filter_by_keys': {'stepRange': target_step}})
+                        ds_interval = xr.open_dataset(local_file, engine="cfgrib", backend_kwargs={'filter_by_keys': {'stepRange': target_step}})
                         temp_data = ds_interval.ppffg.values
-                        if hour_max is None: hour_max = temp_data
-                        else: hour_max = np.maximum(hour_max, temp_data)
-
+                        hour_max = temp_data if hour_max is None else np.maximum(hour_max, temp_data)
                         if lats is None:
                             lats = ds_interval.latitude.values
                             lons = ds_interval.longitude.values
@@ -274,11 +336,9 @@ for target_day in [1, 2]:
                     except: continue
 
                 if hour_max is not None:
-                    if max_ffg_grid is None: max_ffg_grid = hour_max
-                    else: max_ffg_grid = np.maximum(max_ffg_grid, hour_max)
+                    max_ffg_grid = hour_max if max_ffg_grid is None else np.maximum(max_ffg_grid, hour_max)
             except: pass
 
-        # LOCK THE EXACT DATE TO THE DICTIONARY
         refs_results[target_day] = {
             'max': max_ffg_grid, 'lats': lats, 'lons': lons,
             'cycle': cycle, 'status': status, 'date': date_str
@@ -289,19 +349,20 @@ for target_day in [1, 2]:
 # ==========================================
 # 3. PLOTTING AND EXPORT
 # ==========================================
+Path("archive").mkdir(exist_ok=True)
+proj = ccrs.LambertConformal(central_longitude=-97.5, central_latitude=38.5)
 
 if href_results and refs_results:
     print("\n--- GENERATING GRAPHICS ---")
     ero_colors = ['#32CD32', '#FFFF00', '#FFA500', '#FF0000', '#A52A2A', '#FF00FF']
-    cmap = ListedColormap(ero_colors)
-    bounds = [5, 15, 25, 40, 55, 70, 100]
-    norm = BoundaryNorm(bounds, cmap.N)
-    cmap.set_over('#FF00FF')
-    proj = ccrs.LambertConformal(central_longitude=-97.5, central_latitude=38.5)
+    cmap_prob = ListedColormap(ero_colors)
+    bounds_prob = [5, 15, 25, 40, 55, 70, 100]
+    norm_prob = BoundaryNorm(bounds_prob, cmap_prob.N)
+    cmap_prob.set_over('#FF00FF')
 
     for day in [1, 2]:
+        # --- GRAPHIC 1: HREF vs REFS EXCEEDANCE PROBABILITY ---
         fig, axes = plt.subplots(1, 2, figsize=(24, 10), subplot_kw={'projection': proj})
-
         href = href_results.get(day, {})
         refs = refs_results.get(day, {})
 
@@ -311,62 +372,69 @@ if href_results and refs_results:
             ax.add_feature(cfeature.STATES, linewidth=0.5, edgecolor='gray')
             ax.set_extent([-120, -70, 20, 50], crs=ccrs.PlateCarree())
 
-        # --- PLOT HEAVILY SMOOTHED HREF ---
         h_max_raw, h_lats, h_lons = href.get('max'), href.get('lats'), href.get('lons')
-        h_cycle, h_stat = href.get('cycle', 0), href.get('status', 'Unknown')
-        h_date = href.get('date', 'UNKNOWN_DATE') # Securely extracted date
+        h_cycle, h_stat, h_date = href.get('cycle', 0), href.get('status', 'Unknown'), href.get('date', 'UNKNOWN_DATE')
         h_max_smooth = apply_heavy_smoothing(h_max_raw)
 
         if h_max_smooth is not None and np.nanmax(h_max_smooth) >= 5:
-            axes[0].contourf(h_lons, h_lats, h_max_smooth, transform=ccrs.PlateCarree(), levels=bounds, cmap=cmap, norm=norm, extend='max')
-        else:
-            axes[0].text(0.5, 0.5, "NO FLASH FLOOD THREAT\nOR DATA UNAVAILABLE",
-                         transform=axes[0].transAxes, fontsize=25, color='red', alpha=0.3, fontweight='bold', ha='center', va='center')
+            axes[0].contourf(h_lons, h_lats, h_max_smooth, transform=ccrs.PlateCarree(), levels=bounds_prob, cmap=cmap_prob, norm=norm_prob, extend='max')
+        
+        axes[0].set_title(f"HREF {h_date} {h_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({h_stat})", fontsize=16, loc='left', fontweight='bold')
 
-        # Date added directly to the title
-        axes[0].set_title(f"HREF {h_date} {h_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({h_stat})",
-                          fontsize=16, loc='left', fontweight='bold')
-
-        # --- PLOT HEAVILY SMOOTHED REFS ---
         r_max_raw, r_lats, r_lons = refs.get('max'), refs.get('lats'), refs.get('lons')
-        r_cycle, r_stat = refs.get('cycle', 0), refs.get('status', 'Unknown')
-        r_date = refs.get('date', 'UNKNOWN_DATE') # Securely extracted date
+        r_cycle, r_stat, r_date = refs.get('cycle', 0), refs.get('status', 'Unknown'), refs.get('date', 'UNKNOWN_DATE')
         r_max_smooth = apply_heavy_smoothing(r_max_raw)
 
         if r_max_smooth is not None and np.nanmax(r_max_smooth) >= 5:
-            axes[1].contourf(r_lons, r_lats, r_max_smooth, transform=ccrs.PlateCarree(), levels=bounds, cmap=cmap, norm=norm, extend='max')
-        else:
-            axes[1].text(0.5, 0.5, "NO FLASH FLOOD THREAT\nOR DATA UNAVAILABLE",
-                         transform=axes[1].transAxes, fontsize=25, color='red', alpha=0.3, fontweight='bold', ha='center', va='center')
+            axes[1].contourf(r_lons, r_lats, r_max_smooth, transform=ccrs.PlateCarree(), levels=bounds_prob, cmap=cmap_prob, norm=norm_prob, extend='max')
 
-        # Date added directly to the title
-        axes[1].set_title(f"REFS {r_date} {r_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({r_stat})",
-                          fontsize=16, loc='left', fontweight='bold')
+        axes[1].set_title(f"REFS {r_date} {r_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({r_stat})", fontsize=16, loc='left', fontweight='bold')
 
-        # --- COLORBAR & FORMATTING ---
         cbar_ax = fig.add_axes([0.15, 0.08, 0.7, 0.03])
-        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm = ScalarMappable(cmap=cmap_prob, norm=norm_prob)
         sm.set_array([])
-        cbar = plt.colorbar(sm, cax=cbar_ax, orientation='horizontal', ticks=bounds)
-        cbar.ax.set_xticklabels([f'{t}%' for t in bounds], fontsize=13)
+        cbar = plt.colorbar(sm, cax=cbar_ax, orientation='horizontal', ticks=bounds_prob)
+        cbar.ax.set_xticklabels([f'{t}%' for t in bounds_prob], fontsize=13)
         cbar.set_label(f'Day {day} - Maximum Probability of Exceeding FFG (1/3/6hr) [Smoothed]', fontsize=15, fontweight='bold')
-
         plt.subplots_adjust(bottom=0.15, wspace=0.05)
         
-        # Save output and clear memory
-        archive_dir = Path("archive")
-        archive_dir.mkdir(exist_ok=True)
-         
-        # 1. Save the Archive Copy (using securely extracted h_date to prevent mismatches)
-        archive_filename = f"archive/{h_date}_{h_cycle:02d}z_day{day}.png"
-        plt.savefig(archive_filename, bbox_inches='tight', dpi=150)
+        plt.savefig(f"archive/{h_date}_{h_cycle:02d}z_day{day}.png", bbox_inches='tight', dpi=150)
+        plt.savefig(f"day{day}_latest.png", bbox_inches='tight', dpi=150)
+        plt.close(fig) 
         
-        # 2. Save the Latest Copy
-        latest_filename = f"day{day}_latest.png"
-        plt.savefig(latest_filename, bbox_inches='tight', dpi=150)
-        
-        print(f"Saved {latest_filename} and archived as {archive_filename}")
-        plt.close(fig) # Prevent memory leaks in Github Actions
+        # --- GRAPHIC 2: PMM MAGNITUDE RATIO VS FRACTIONAL COVERAGE ---
+        if day in href_pmm_results:
+            pmm = href_pmm_results[day]
+            fig_pmm, axes_pmm = plt.subplots(1, 2, figsize=(24, 10), subplot_kw={'projection': proj})
+            
+            for ax in axes_pmm:
+                ax.add_feature(cfeature.COASTLINE, linewidth=1.0)
+                ax.add_feature(cfeature.BORDERS, linewidth=1.0)
+                ax.add_feature(cfeature.STATES, linewidth=0.5, edgecolor='gray')
+                ax.set_extent([-120, -70, 20, 50], crs=ccrs.PlateCarree())
+
+            # Left Panel: PMM Ratio
+            ratio_levels = [0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+            ratio_colors = ['#ffff00', '#ffa500', '#ff0000', '#8b0000', '#ff00ff', '#800080', '#0000ff', '#00ffff']
+            cf_ratio = axes_pmm[0].contourf(pmm['lons'], pmm['lats'], pmm['ratio'], levels=ratio_levels, colors=ratio_colors, transform=ccrs.PlateCarree(), alpha=0.9, extend='max')
+            axes_pmm[0].set_title(f"HREF pmmn {pmm['date']} {pmm['cycle']:02d}z: Max FFG Exceedance Ratio\n40-km Circular Neighborhood", fontsize=16, fontweight='bold', loc='left')
+            cbar_ratio = plt.colorbar(cf_ratio, ax=axes_pmm[0], orientation='horizontal', pad=0.03, shrink=0.8, aspect=40)
+            cbar_ratio.set_label('Exceedance Ratio (QPF / FFG)', fontsize=12, fontweight='bold')
+
+            # Right Panel: Fractional Coverage
+            coverage_levels = [1, 5, 10, 25, 50, 75, 100]
+            coverage_colors = ['#e0f7fa', '#c8e6c9', '#fff59d', '#ffb74d', '#f44336', '#9c27b0'] 
+            cf_cov = axes_pmm[1].contourf(pmm['lons'], pmm['lats'], pmm['coverage'], levels=coverage_levels, colors=coverage_colors, transform=ccrs.PlateCarree(), alpha=0.9, extend='max')
+            axes_pmm[1].set_title(f"HREF pmmn {pmm['date']} {pmm['cycle']:02d}z: FFG Exceedance Coverage\n40-km Neighborhood Fraction", fontsize=16, fontweight='bold', loc='left')
+            cbar_cov = plt.colorbar(cf_cov, ax=axes_pmm[1], orientation='horizontal', pad=0.03, shrink=0.8, aspect=40)
+            cbar_cov.set_label('Areal Coverage Percentage (%)', fontsize=12, fontweight='bold')
+            
+            plt.subplots_adjust(bottom=0.05, wspace=0.05)
+            
+            # Save the new PMM graphics alongside the existing ones
+            plt.savefig(f"archive/{pmm['date']}_{pmm['cycle']:02d}z_day{day}_pmm.png", bbox_inches='tight', dpi=150)
+            plt.savefig(f"day{day}_pmm_latest.png", bbox_inches='tight', dpi=150)
+            plt.close(fig_pmm)
 
 else:
     print("Missing data: Processing failed for one or both models.")
