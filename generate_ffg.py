@@ -87,7 +87,7 @@ def get_rrfs_fxx_range(cycle, target_day):
 def get_latest_rrfs_run(target_day):
     now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
-    base_url = "https://noaa-rrfs-pds.s3.amazonaws.com"
+    base_url = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/refs/para/"
 
     for i in range(6):
         dt = current_cycle_time - timedelta(hours=6 * i)
@@ -97,7 +97,7 @@ def get_latest_rrfs_run(target_day):
         if fxx_range is None: continue
         last_fxx = fxx_range[-1]
 
-        folder_path = f"/rrfs_public/refs.{date_str}/{cycle:02d}/enspost"
+        folder_path = f"/refs.{date_str}/{cycle:02d}/ensprod"
         file_name = f"refs.t{cycle:02d}z.ffri.f{last_fxx:02d}.conus.grib2"
         idx_url = f"{base_url}{folder_path}/{file_name}.idx"
 
@@ -108,7 +108,7 @@ def get_latest_rrfs_run(target_day):
         except: pass
     raise ValueError(f"Could not find fully uploaded REFS runs.")
 
-def download_aws_subset(grib_url, idx_url, search_str, local_file):
+def download_idx_subset(grib_url, idx_url, search_str, local_file):
     idx_resp = requests.get(idx_url, timeout=10)
     if idx_resp.status_code != 200: return False
     lines = idx_resp.text.strip().split('\n')
@@ -346,7 +346,7 @@ for target_day in [1, 2]:
 
             download_success = False
             for attempt in range(3):
-                if download_aws_subset(grib_url, idx_url, ":PPFFG:", local_file):
+                if download_idx_subset(grib_url, idx_url, ":PPFFG:", local_file):
                     download_success = True
                     break
                 time.sleep(2)
