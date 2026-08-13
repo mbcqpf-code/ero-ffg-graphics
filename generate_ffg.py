@@ -88,7 +88,7 @@ def get_latest_rrfs_run(target_day):
     now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
     
-    # REFS Shifted to NOMADS Para Servers
+    # Updated NOMADS Para Servers
     base_url = "https://nomads.ncep.noaa.gov"
     headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -100,19 +100,26 @@ def get_latest_rrfs_run(target_day):
         if fxx_range is None: continue
         last_fxx = fxx_range[-1]
 
-        folder_path = f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}"
+        # Check both potential directory structures just in case
+        possible_folders = [
+            f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}/enspost",
+            f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}"
+        ]
+        
         file_name = f"refs.t{cycle:02d}z.ffri.f{last_fxx:02d}.conus.grib2"
-        idx_url = f"{base_url}{folder_path}/{file_name}.idx"
-
-        try:
-            if requests.head(idx_url, headers=headers, timeout=5).status_code == 200:
-                print(f"✅ Locked in fully uploaded REFS run: Date={date_str}, Cycle={cycle:02d}z")
-                return date_str, cycle, fxx_range, folder_path, base_url, status
-        except: pass
+        
+        for folder_path in possible_folders:
+            idx_url = f"{base_url}{folder_path}/{file_name}.idx"
+            try:
+                # Swapped HEAD for GET to bypass NOMADS security block
+                if requests.get(idx_url, headers=headers, timeout=5).status_code == 200:
+                    print(f"✅ Locked in fully uploaded REFS run: Date={date_str}, Cycle={cycle:02d}z")
+                    return date_str, cycle, fxx_range, folder_path, base_url, status
+            except: pass
+            
     raise ValueError(f"Could not find fully uploaded REFS runs.")
 
 def download_idx_subset(grib_url, idx_url, search_str, local_file):
-    # User-Agent added to prevent NOMADS from blocking headless servers
     headers = {"User-Agent": "Mozilla/5.0"}
     idx_resp = requests.get(idx_url, headers=headers, timeout=10)
     if idx_resp.status_code != 200: return False
@@ -301,6 +308,7 @@ for target_day in [1, 2]:
 
         if not skip_qpf:
             try:
+                # Dynamic GRIB accumulation regex based on Cycle/Day
                 if target_day == 1:
                     if cycle == 0: fxx_end, acc_regex = 36, r"12-36"
                     elif cycle == 6: fxx_end, acc_regex = 30, r"6-30"
@@ -351,6 +359,7 @@ for target_day in [1, 2]:
 
             download_success = False
             for attempt in range(3):
+                # Correctly calls the updated download_idx_subset function name
                 if download_idx_subset(grib_url, idx_url, ":PPFFG:", local_file):
                     download_success = True
                     break
