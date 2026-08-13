@@ -99,7 +99,6 @@ def get_latest_rrfs_run(target_day):
         if fxx_range is None: continue
         last_fxx = fxx_range[-1]
 
-        # FIX: Changed 'enspost' to 'ensprod'
         possible_folders = [
             f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}/ensprod",
             f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}"
@@ -108,9 +107,12 @@ def get_latest_rrfs_run(target_day):
         file_name = f"refs.t{cycle:02d}z.ffri.f{last_fxx:02d}.conus.grib2"
         
         for folder_path in possible_folders:
-            idx_url = f"{base_url}{folder_path}/{file_name}.idx"
+            grib_url = f"{base_url}{folder_path}/{file_name}"
             try:
-                if requests.get(idx_url, headers=headers, timeout=5).status_code == 200:
+                # FIX: Check for the GRIB file directly using a streaming GET instead of an index file
+                test_resp = requests.get(grib_url, headers=headers, stream=True, timeout=5)
+                if test_resp.status_code == 200:
+                    test_resp.close() 
                     print(f"✅ Locked in fully uploaded REFS run: Date={date_str}, Cycle={cycle:02d}z")
                     return date_str, cycle, fxx_range, folder_path, base_url, status
             except: pass
@@ -120,24 +122,40 @@ def get_latest_rrfs_run(target_day):
 def download_idx_subset(grib_url, idx_url, search_str, local_file):
     headers = {"User-Agent": "Mozilla/5.0"}
     idx_resp = requests.get(idx_url, headers=headers, timeout=10)
-    if idx_resp.status_code != 200: return False
-    lines = idx_resp.text.strip().split('\n')
-    starts, ends = [], []
-    for i, line in enumerate(lines):
-        if search_str in line:
-            parts = line.split(':')
-            starts.append(int(parts[1]))
-            if i + 1 < len(lines): ends.append(int(lines[i+1].split(':')[1]) - 1)
-            else: ends.append(None)
-    if not starts: return False
-    min_byte = min(starts)
-    max_byte = max([e for e in ends if e is not None]) if None not in ends else ""
     
-    req_headers = {"User-Agent": "Mozilla/5.0", "Range": f"bytes={min_byte}-{max_byte}"}
-    grib_resp = requests.get(grib_url, headers=req_headers, timeout=30)
-    if grib_resp.status_code in (200, 206):
-        with open(local_file, 'wb') as f: f.write(grib_resp.content)
-        return True
+    # 1. If the index file exists, do the fast partial download
+    if idx_resp.status_code == 200:
+        lines = idx_resp.text.strip().split('\n')
+        starts, ends = [], []
+        for i, line in enumerate(lines):
+            if search_str in line:
+                parts = line.split(':')
+                starts.append(int(parts[1]))
+                if i + 1 < len(lines): ends.append(int(lines[i+1].split(':')[1]) - 1)
+                else: ends.append(None)
+        if not starts: return False
+        min_byte = min(starts)
+        max_byte = max([e for e in ends if e is not None]) if None not in ends else ""
+        
+        req_headers = {"User-Agent": "Mozilla/5.0", "Range": f"bytes={min_byte}-{max_byte}"}
+        grib_resp = requests.get(grib_url, headers=req_headers, timeout=30)
+        if grib_resp.status_code in (200, 206):
+            with open(local_file, 'wb') as f: f.write(grib_resp.content)
+            return True
+        return False
+        
+    # 2. FIX: If the index file is missing, gracefully fallback to downloading the entire file
+    elif idx_resp.status_code == 404:
+        print(f"      [!] No .idx file found on NOMADS. Falling back to full GRIB download...")
+        grib_resp = requests.get(grib_url, headers=headers, stream=True, timeout=60)
+        if grib_resp.status_code == 200:
+            with open(local_file, 'wb') as f:
+                # Download in 1MB chunks to keep memory usage low
+                for chunk in grib_resp.iter_content(chunk_size=1024*1024):
+                    if chunk: f.write(chunk)
+            return True
+        return False
+        
     return False
 
 def apply_heavy_smoothing(grid, sigma=5.0):
@@ -400,7 +418,6 @@ for target_day in [1, 2]:
 Path("archive").mkdir(exist_ok=True)
 proj = ccrs.LambertConformal(central_longitude=-97.5, central_latitude=38.5)
 
-# FIX: Uncoupled the plotting trigger so partial success still pushes to the dashboard
 if href_results or refs_results:
     print("\n--- GENERATING GRAPHICS ---")
     ero_colors = ['#32CD32', '#FFFF00', '#FFA500', '#FF0000', '#A52A2A', '#FF00FF']
@@ -455,7 +472,6 @@ if href_results or refs_results:
         cbar.set_label(f'Day {day} - Maximum Probability of Exceeding FFG (1/3/6hr) [Smoothed]', fontsize=15, fontweight='bold')
         plt.subplots_adjust(bottom=0.15, wspace=0.05)
         
-        # Save output using the date of whichever model actually ran successfully
         save_date = h_date if h_date != 'UNKNOWN_DATE' else r_date
         save_cycle = h_cycle if h_cycle != 0 else r_cycle
         
