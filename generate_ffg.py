@@ -87,7 +87,9 @@ def get_rrfs_fxx_range(cycle, target_day):
 def get_latest_rrfs_run(target_day):
     now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
-    base_url = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/refs/para/"
+    
+    base_url = "https://nomads.ncep.noaa.gov"
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     for i in range(6):
         dt = current_cycle_time - timedelta(hours=6 * i)
@@ -97,19 +99,27 @@ def get_latest_rrfs_run(target_day):
         if fxx_range is None: continue
         last_fxx = fxx_range[-1]
 
-        folder_path = f"/refs.{date_str}/{cycle:02d}/ensprod"
+        # FIX: Changed 'enspost' to 'ensprod'
+        possible_folders = [
+            f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}/ensprod",
+            f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}"
+        ]
+        
         file_name = f"refs.t{cycle:02d}z.ffri.f{last_fxx:02d}.conus.grib2"
-        idx_url = f"{base_url}{folder_path}/{file_name}.idx"
-
-        try:
-            if requests.head(idx_url, timeout=5).status_code == 200:
-                print(f"✅ Locked in fully uploaded REFS run: Date={date_str}, Cycle={cycle:02d}z")
-                return date_str, cycle, fxx_range, folder_path, base_url, status
-        except: pass
+        
+        for folder_path in possible_folders:
+            idx_url = f"{base_url}{folder_path}/{file_name}.idx"
+            try:
+                if requests.get(idx_url, headers=headers, timeout=5).status_code == 200:
+                    print(f"✅ Locked in fully uploaded REFS run: Date={date_str}, Cycle={cycle:02d}z")
+                    return date_str, cycle, fxx_range, folder_path, base_url, status
+            except: pass
+            
     raise ValueError(f"Could not find fully uploaded REFS runs.")
 
 def download_idx_subset(grib_url, idx_url, search_str, local_file):
-    idx_resp = requests.get(idx_url, timeout=10)
+    headers = {"User-Agent": "Mozilla/5.0"}
+    idx_resp = requests.get(idx_url, headers=headers, timeout=10)
     if idx_resp.status_code != 200: return False
     lines = idx_resp.text.strip().split('\n')
     starts, ends = [], []
@@ -122,8 +132,9 @@ def download_idx_subset(grib_url, idx_url, search_str, local_file):
     if not starts: return False
     min_byte = min(starts)
     max_byte = max([e for e in ends if e is not None]) if None not in ends else ""
-    headers = {"Range": f"bytes={min_byte}-{max_byte}"}
-    grib_resp = requests.get(grib_url, headers=headers, timeout=30)
+    
+    req_headers = {"User-Agent": "Mozilla/5.0", "Range": f"bytes={min_byte}-{max_byte}"}
+    grib_resp = requests.get(grib_url, headers=req_headers, timeout=30)
     if grib_resp.status_code in (200, 206):
         with open(local_file, 'wb') as f: f.write(grib_resp.content)
         return True
@@ -389,7 +400,8 @@ for target_day in [1, 2]:
 Path("archive").mkdir(exist_ok=True)
 proj = ccrs.LambertConformal(central_longitude=-97.5, central_latitude=38.5)
 
-if href_results and refs_results:
+# FIX: Uncoupled the plotting trigger so partial success still pushes to the dashboard
+if href_results or refs_results:
     print("\n--- GENERATING GRAPHICS ---")
     ero_colors = ['#32CD32', '#FFFF00', '#FFA500', '#FF0000', '#A52A2A', '#FF00FF']
     cmap_prob = ListedColormap(ero_colors)
@@ -409,21 +421,29 @@ if href_results and refs_results:
             ax.add_feature(cfeature.STATES, linewidth=0.5, edgecolor='gray')
             ax.set_extent([-120, -70, 20, 50], crs=ccrs.PlateCarree())
 
-        h_max_raw, h_lats, h_lons = href.get('max'), href.get('lats'), href.get('lons')
+        # HREF PLOT
+        h_max_raw = href.get('max')
+        h_lats, h_lons = href.get('lats'), href.get('lons')
         h_cycle, h_stat, h_date = href.get('cycle', 0), href.get('status', 'Unknown'), href.get('date', 'UNKNOWN_DATE')
         h_max_smooth = apply_heavy_smoothing(h_max_raw)
 
         if h_max_smooth is not None and np.nanmax(h_max_smooth) >= 5:
             axes[0].contourf(h_lons, h_lats, h_max_smooth, transform=ccrs.PlateCarree(), levels=bounds_prob, cmap=cmap_prob, norm=norm_prob, extend='max')
+        else:
+            axes[0].text(0.5, 0.5, "NO FLASH FLOOD THREAT\nOR DATA UNAVAILABLE", transform=axes[0].transAxes, fontsize=25, color='red', alpha=0.3, fontweight='bold', ha='center', va='center')
         
         axes[0].set_title(f"HREF {h_date} {h_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({h_stat})", fontsize=16, loc='left', fontweight='bold')
 
-        r_max_raw, r_lats, r_lons = refs.get('max'), refs.get('lats'), refs.get('lons')
+        # REFS PLOT
+        r_max_raw = refs.get('max')
+        r_lats, r_lons = refs.get('lats'), refs.get('lons')
         r_cycle, r_stat, r_date = refs.get('cycle', 0), refs.get('status', 'Unknown'), refs.get('date', 'UNKNOWN_DATE')
         r_max_smooth = apply_heavy_smoothing(r_max_raw)
 
         if r_max_smooth is not None and np.nanmax(r_max_smooth) >= 5:
             axes[1].contourf(r_lons, r_lats, r_max_smooth, transform=ccrs.PlateCarree(), levels=bounds_prob, cmap=cmap_prob, norm=norm_prob, extend='max')
+        else:
+            axes[1].text(0.5, 0.5, "NO FLASH FLOOD THREAT\nOR DATA UNAVAILABLE", transform=axes[1].transAxes, fontsize=25, color='red', alpha=0.3, fontweight='bold', ha='center', va='center')
 
         axes[1].set_title(f"REFS {r_date} {r_cycle:02d}z Smoothed Max FFG Exceedance\nValid: Day {day} ERO Period ({r_stat})", fontsize=16, loc='left', fontweight='bold')
 
@@ -435,7 +455,11 @@ if href_results and refs_results:
         cbar.set_label(f'Day {day} - Maximum Probability of Exceeding FFG (1/3/6hr) [Smoothed]', fontsize=15, fontweight='bold')
         plt.subplots_adjust(bottom=0.15, wspace=0.05)
         
-        plt.savefig(f"archive/{h_date}_{h_cycle:02d}z_day{day}.png", bbox_inches='tight', dpi=150)
+        # Save output using the date of whichever model actually ran successfully
+        save_date = h_date if h_date != 'UNKNOWN_DATE' else r_date
+        save_cycle = h_cycle if h_cycle != 0 else r_cycle
+        
+        plt.savefig(f"archive/{save_date}_{save_cycle:02d}z_day{day}.png", bbox_inches='tight', dpi=150)
         plt.savefig(f"day{day}_latest.png", bbox_inches='tight', dpi=150)
         plt.close(fig) 
         
@@ -499,14 +523,17 @@ if href_results and refs_results:
             plt.savefig(f"day{day}_qpf_latest.png", bbox_inches='tight', dpi=150)
             plt.close(fig_qpf)
         else:
-            # Generate the graceful fallback image directly via matplotlib
-            if h_cycle != 0: # Ensure we actually ran this cycle
+            if h_cycle != 0 or r_cycle != 0: 
                 fig_blank, ax_blank = plt.subplots(figsize=(14, 10))
-                ax_blank.text(0.5, 0.5, f"NO 24-HR QPF AVAILABLE\nDay {day} is a partial period for the {h_cycle:02d}z cycle.", fontsize=25, color='gray', alpha=0.5, fontweight='bold', ha='center', va='center')
+                ax_blank.text(0.5, 0.5, f"NO 24-HR QPF AVAILABLE\nDay {day} is a partial period for this cycle.", fontsize=25, color='gray', alpha=0.5, fontweight='bold', ha='center', va='center')
                 ax_blank.axis('off')
-                plt.savefig(f"archive/{h_date}_{h_cycle:02d}z_day{day}_qpf.png", bbox_inches='tight', dpi=150)
+                
+                blank_date = h_date if h_date != 'UNKNOWN_DATE' else r_date
+                blank_cycle = h_cycle if h_cycle != 0 else r_cycle
+                
+                plt.savefig(f"archive/{blank_date}_{blank_cycle:02d}z_day{day}_qpf.png", bbox_inches='tight', dpi=150)
                 plt.savefig(f"day{day}_qpf_latest.png", bbox_inches='tight', dpi=150)
                 plt.close(fig_blank)
 
 else:
-    print("Missing data: Processing failed for one or both models.")
+    print("Missing data: Processing failed for all models.")
