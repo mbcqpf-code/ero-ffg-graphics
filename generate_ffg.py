@@ -87,7 +87,10 @@ def get_rrfs_fxx_range(cycle, target_day):
 def get_latest_rrfs_run(target_day):
     now = datetime.now(timezone.utc)
     current_cycle_time = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
-    base_url = "https://noaa-rrfs-pds.s3.amazonaws.com"
+    
+    # REFS Shifted to NOMADS Para Servers
+    base_url = "https://nomads.ncep.noaa.gov"
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     for i in range(6):
         dt = current_cycle_time - timedelta(hours=6 * i)
@@ -97,19 +100,21 @@ def get_latest_rrfs_run(target_day):
         if fxx_range is None: continue
         last_fxx = fxx_range[-1]
 
-        folder_path = f"/rrfs_public/refs.{date_str}/{cycle:02d}/enspost"
+        folder_path = f"/pub/data/nccf/com/refs/para/refs.{date_str}/{cycle:02d}"
         file_name = f"refs.t{cycle:02d}z.ffri.f{last_fxx:02d}.conus.grib2"
         idx_url = f"{base_url}{folder_path}/{file_name}.idx"
 
         try:
-            if requests.head(idx_url, timeout=5).status_code == 200:
+            if requests.head(idx_url, headers=headers, timeout=5).status_code == 200:
                 print(f"✅ Locked in fully uploaded REFS run: Date={date_str}, Cycle={cycle:02d}z")
                 return date_str, cycle, fxx_range, folder_path, base_url, status
         except: pass
     raise ValueError(f"Could not find fully uploaded REFS runs.")
 
-def download_aws_subset(grib_url, idx_url, search_str, local_file):
-    idx_resp = requests.get(idx_url, timeout=10)
+def download_idx_subset(grib_url, idx_url, search_str, local_file):
+    # User-Agent added to prevent NOMADS from blocking headless servers
+    headers = {"User-Agent": "Mozilla/5.0"}
+    idx_resp = requests.get(idx_url, headers=headers, timeout=10)
     if idx_resp.status_code != 200: return False
     lines = idx_resp.text.strip().split('\n')
     starts, ends = [], []
@@ -122,8 +127,9 @@ def download_aws_subset(grib_url, idx_url, search_str, local_file):
     if not starts: return False
     min_byte = min(starts)
     max_byte = max([e for e in ends if e is not None]) if None not in ends else ""
-    headers = {"Range": f"bytes={min_byte}-{max_byte}"}
-    grib_resp = requests.get(grib_url, headers=headers, timeout=30)
+    
+    req_headers = {"User-Agent": "Mozilla/5.0", "Range": f"bytes={min_byte}-{max_byte}"}
+    grib_resp = requests.get(grib_url, headers=req_headers, timeout=30)
     if grib_resp.status_code in (200, 206):
         with open(local_file, 'wb') as f: f.write(grib_resp.content)
         return True
@@ -295,7 +301,6 @@ for target_day in [1, 2]:
 
         if not skip_qpf:
             try:
-                # Dynamic GRIB accumulation regex based on Cycle/Day
                 if target_day == 1:
                     if cycle == 0: fxx_end, acc_regex = 36, r"12-36"
                     elif cycle == 6: fxx_end, acc_regex = 30, r"6-30"
@@ -346,7 +351,7 @@ for target_day in [1, 2]:
 
             download_success = False
             for attempt in range(3):
-                if download_aws_subset(grib_url, idx_url, ":PPFFG:", local_file):
+                if download_idx_subset(grib_url, idx_url, ":PPFFG:", local_file):
                     download_success = True
                     break
                 time.sleep(2)
@@ -499,8 +504,7 @@ if href_results and refs_results:
             plt.savefig(f"day{day}_qpf_latest.png", bbox_inches='tight', dpi=150)
             plt.close(fig_qpf)
         else:
-            # Generate the graceful fallback image directly via matplotlib
-            if h_cycle != 0: # Ensure we actually ran this cycle
+            if h_cycle != 0: 
                 fig_blank, ax_blank = plt.subplots(figsize=(14, 10))
                 ax_blank.text(0.5, 0.5, f"NO 24-HR QPF AVAILABLE\nDay {day} is a partial period for the {h_cycle:02d}z cycle.", fontsize=25, color='gray', alpha=0.5, fontweight='bold', ha='center', va='center')
                 ax_blank.axis('off')
